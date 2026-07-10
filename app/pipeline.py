@@ -62,7 +62,12 @@ def _apply_triage(ticket: dict, verdict: dict) -> None:
     prio = PRIORITY_IDS.get(verdict.get("priority", ""))
     if prio and prio != ticket.get("priority"):
         fields["priority"] = prio
-    tags = sorted(set((ticket.get("tags") or []) + (verdict.get("tags") or []) + [f"ai-{verdict.get('category', 'other')}"]))
+    flag_tags = [f"ai-{verdict.get('category', 'other')}"]
+    if verdict.get("needs_human"):
+        flag_tags.append("needs-human")
+    elif verdict.get("reply", "").strip():
+        flag_tags.append("ai-draft-ready")
+    tags = sorted(set((ticket.get("tags") or []) + (verdict.get("tags") or []) + flag_tags))
     if tags != sorted(ticket.get("tags") or []):
         fields["tags"] = tags
     try:
