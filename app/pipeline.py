@@ -39,10 +39,26 @@ def _already_auto_replied(ticket: dict) -> int:
     return n
 
 
+# Freshdesk on this account requires a ticket "Type" on any update; portal and
+# chat tickets often arrive without one. Map the agent's category to a valid Type.
+CATEGORY_TO_TYPE = {
+    "how-to": "Question",
+    "account": "Question",
+    "order-status": "Question",
+    "feature-request": "Question",
+    "billing-question": "Billing",
+    "refund-request": "Billing",
+    "bug-report": "Problem",
+    "complaint": "Problem",
+}
+
+
 def _apply_triage(ticket: dict, verdict: dict) -> None:
     if not settings.triage_enabled:
         return
     fields: dict = {}
+    if not ticket.get("type"):
+        fields["type"] = CATEGORY_TO_TYPE.get(verdict.get("category", ""), "Question")
     prio = PRIORITY_IDS.get(verdict.get("priority", ""))
     if prio and prio != ticket.get("priority"):
         fields["priority"] = prio
