@@ -16,6 +16,7 @@ import html
 import json
 import logging
 
+from . import store
 from .agent import handle_ticket
 from .config import settings
 from .freshdesk import PRIORITY_IDS, fd
@@ -112,11 +113,25 @@ def process_ticket(ticket_id: int) -> None:
     if ok:
         fd.reply(ticket_id, _to_html(reply_text) + f"<!-- {BOT_MARKER} -->")
         fd.private_note(ticket_id, triage_note + "<p><i>Reply auto-sent by AI agent.</i></p>")
+        action = "auto-replied"
         log.info("Ticket #%s: auto-replied", ticket_id)
     elif reply_text:
         draft = triage_note + f"<p><b>Draft reply (not sent — {html.escape(reason)}):</b></p>" + _to_html(reply_text)
         fd.private_note(ticket_id, draft)
+        action = "draft-posted"
         log.info("Ticket #%s: draft posted (%s)", ticket_id, reason)
     else:
         fd.private_note(ticket_id, triage_note + "<p><i>No reply drafted.</i></p>")
+        action = "triage-only"
         log.info("Ticket #%s: triage only", ticket_id)
+
+    store.record(
+        ticket_id,
+        subject=ticket.get("subject") or "",
+        category=verdict.get("category") or "",
+        priority=verdict.get("priority") or "",
+        sentiment=verdict.get("sentiment") or "",
+        confidence=verdict.get("confidence"),
+        needs_human=verdict.get("needs_human"),
+        action=action,
+    )

@@ -30,6 +30,9 @@ class Settings:
     # Webhook security: Freshdesk automation sends this in the X-Webhook-Secret header
     webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
 
+    # Access key for the team dashboard at /dashboard (empty = dashboard disabled)
+    dashboard_key: str = os.getenv("DASHBOARD_KEY", "")
+
     # Behavior
     # Master switch: when false, the agent NEVER sends customer-facing replies;
     # everything is posted as a private note (draft) for human review.

@@ -12,7 +12,9 @@ import logging
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
+from . import store
 from .config import settings
+from .dashboard import router as dashboard_router
 from .knowledge import load_docs
 from .pipeline import process_ticket
 
@@ -20,6 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 log = logging.getLogger("main")
 
 app = FastAPI(title="Freshdesk Support Agent")
+app.include_router(dashboard_router)
 
 
 @app.on_event("startup")
@@ -73,5 +76,9 @@ async def ticket_webhook(
 def _safe_process(ticket_id: int) -> None:
     try:
         process_ticket(ticket_id)
-    except Exception:
+    except Exception as e:
         log.exception("Failed processing ticket #%s", ticket_id)
+        try:
+            store.record(ticket_id, action="error", detail=str(e))
+        except Exception:
+            pass
