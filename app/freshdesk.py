@@ -48,6 +48,8 @@ class FreshdeskClient:
                 log.warning("Rate limited; sleeping %ss", wait)
                 time.sleep(wait)
                 continue
+            if resp.status_code >= 400:
+                log.error("Freshdesk %s %s -> %s: %s", method, path, resp.status_code, resp.text[:500])
             resp.raise_for_status()
             return resp.json() if resp.content else None
         resp.raise_for_status()
@@ -75,10 +77,14 @@ class FreshdeskClient:
 
     def search_tickets(self, query: str, page: int = 1) -> list[dict]:
         """Search past tickets. Query uses Freshdesk's query language,
-        e.g. 'status:4 OR status:5' — but for keyword lookups we use the
-        general term match on subject/description via the search endpoint."""
-        data = self._request("GET", f"/search/tickets?query=\"{query}\"&page={page}")
-        return data.get("results", []) if isinstance(data, dict) else []
+        e.g. 'status:4 OR status:5'. Free-text queries are not supported on
+        all plans, so failures degrade to an empty result."""
+        try:
+            data = self._request("GET", f"/search/tickets?query=\"{query}\"&page={page}")
+            return data.get("results", []) if isinstance(data, dict) else []
+        except httpx.HTTPStatusError:
+            log.warning("Ticket search unavailable for query %r", query)
+            return []
 
     # ---- Knowledge base (Solutions) ----------------------------------------
 

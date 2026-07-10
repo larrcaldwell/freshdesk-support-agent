@@ -91,7 +91,11 @@ def process_ticket(ticket_id: int) -> None:
         return
 
     verdict = handle_ticket(ticket)
-    _apply_triage(ticket, verdict)
+    try:
+        _apply_triage(ticket, verdict)
+    except Exception:
+        # Triage is best-effort; never let it block the draft/reply.
+        log.exception("Triage update failed for ticket #%s (continuing)", ticket_id)
 
     reply_text = (verdict.get("reply") or "").strip()
     ok, reason = _may_auto_reply(ticket, verdict)
