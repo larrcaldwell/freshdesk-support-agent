@@ -134,6 +134,49 @@ def _run_tool(name: str, args: dict) -> str:
     return f"Unknown tool {name}"
 
 
+CHAT_SYSTEM = """You are a live-chat support copilot for {company}. You are given the
+transcript of an IN-PROGRESS chat between a customer and a human support agent.
+Your job: suggest the next reply the HUMAN AGENT should send.
+
+- Research with your tools first (knowledge base, internal docs) — ground every fact.
+- Keep it SHORT and conversational: 1-3 sentences, chat tone, no email sign-offs.
+- If the human agent has already said something, match their tone and don't repeat it.
+- If the customer asks for a human, they already have one — just help the agent answer.
+- Never promise refunds, credits, or exceptions; if the right move is a judgment call,
+  say so in the reasoning and set needs_human=true.
+- Finish by calling submit_result exactly once; put the suggested reply in "reply"
+  (plain text, no signature)."""
+
+
+def handle_chat(transcript: str) -> dict:
+    """Run the agent on a live chat transcript. Returns the submit_result payload."""
+    messages = [{"role": "user", "content": f"Live chat so far:\n\n{transcript}\n\nSuggest the agent's next reply."}]
+    system = CHAT_SYSTEM.format(company=settings.company_name)
+
+    for _ in range(8):
+        resp = client.messages.create(
+            model=settings.model,
+            max_tokens=settings.max_tokens,
+            system=system,
+            tools=TOOLS,
+            messages=messages,
+        )
+        messages.append({"role": "assistant", "content": resp.content})
+        tool_uses = [b for b in resp.content if b.type == "tool_use"]
+        if not tool_uses:
+            messages.append({"role": "user", "content": "Please call submit_result with your final suggestion."})
+            continue
+        results = []
+        for tu in tool_uses:
+            if tu.name == "submit_result":
+                return dict(tu.input)
+            results.append(
+                {"type": "tool_result", "tool_use_id": tu.id, "content": _run_tool(tu.name, dict(tu.input))}
+            )
+        messages.append({"role": "user", "content": results})
+    raise RuntimeError("Chat agent did not submit a result within the iteration limit")
+
+
 def handle_ticket(ticket: dict) -> dict:
     """Run the agent loop on a ticket dict (with conversations). Returns the
     structured submit_result payload."""

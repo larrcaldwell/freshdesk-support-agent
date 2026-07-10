@@ -12,7 +12,7 @@ import logging
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
-from . import store
+from . import freshchat, store
 from .config import settings
 from .dashboard import router as dashboard_router
 from .knowledge import load_docs
@@ -71,6 +71,37 @@ async def ticket_webhook(
 
     background.add_task(_safe_process, ticket_id)
     return {"accepted": True, "ticket_id": ticket_id}
+
+
+@app.post("/webhook/freshchat")
+async def freshchat_webhook(request: Request, background: BackgroundTasks) -> dict:
+    """Freshchat conversation webhook. Freshchat can't send custom headers, so the
+    shared secret rides in the query string: /webhook/freshchat?key=WEBHOOK_SECRET"""
+    supplied = request.query_params.get("key") or ""
+    if not settings.webhook_secret or not hmac.compare_digest(supplied, settings.webhook_secret):
+        raise HTTPException(status_code=401, detail="Bad webhook key")
+
+    payload = await request.json()
+    action = payload.get("action")
+    actor_type = (payload.get("actor") or {}).get("actor_type")
+    message = (payload.get("data") or {}).get("message") or {}
+    conversation_id = message.get("conversation_id")
+
+    if action == "message_create" and actor_type == "user" and conversation_id:
+        background.add_task(_safe_chat, str(conversation_id))
+        return {"accepted": True, "conversation_id": conversation_id}
+    return {"accepted": False, "ignored": action or "unknown"}
+
+
+def _safe_chat(conversation_id: str) -> None:
+    try:
+        freshchat.process_chat_message(conversation_id)
+    except Exception as e:
+        log.exception("Failed processing chat %s", conversation_id)
+        try:
+            store.record(0, subject=f"[live chat] {conversation_id}", action="error", detail=str(e))
+        except Exception:
+            pass
 
 
 def _safe_process(ticket_id: int) -> None:

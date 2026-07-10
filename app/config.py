@@ -33,6 +33,10 @@ class Settings:
     # Access key for the team dashboard at /dashboard (empty = dashboard disabled)
     dashboard_key: str = os.getenv("DASHBOARD_KEY", "")
 
+    # Freshchat live-chat copilot (both must be set to enable)
+    freshchat_api_url: str = os.getenv("FRESHCHAT_API_URL", "")  # e.g. https://trudigital.freshchat.com/v2
+    freshchat_api_token: str = os.getenv("FRESHCHAT_API_TOKEN", "")
+
     # Behavior
     # Master switch: when false, the agent NEVER sends customer-facing replies;
     # everything is posted as a private note (draft) for human review.
