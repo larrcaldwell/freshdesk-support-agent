@@ -10,9 +10,10 @@ from __future__ import annotations
 import hmac
 import logging
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Request
+from fastapi.responses import RedirectResponse
 
-from . import freshchat, store
+from . import freshchat, store, training
 from .config import settings
 from .dashboard import router as dashboard_router
 from .knowledge import load_docs
@@ -71,6 +72,28 @@ async def ticket_webhook(
 
     background.add_task(_safe_process, ticket_id)
     return {"accepted": True, "ticket_id": ticket_id}
+
+
+@app.post("/feedback")
+async def feedback(
+    request: Request,
+    ticket_id: int = Form(0),
+    subject: str = Form(""),
+    correction: str = Form(...),
+    author: str = Form(""),
+) -> RedirectResponse:
+    """Teach-the-agent form on the dashboard. Auth via the dashboard cookie."""
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+    correction = correction.strip()
+    if correction:
+        store.record_feedback(ticket_id, subject, correction, author.strip())
+        try:
+            training.add_correction(correction, context_subject=subject, ticket_ref=ticket_id, author=author.strip())
+        except Exception:
+            log.exception("Failed to persist teaching to Freshdesk (kept locally)")
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 
 @app.post("/webhook/freshchat")

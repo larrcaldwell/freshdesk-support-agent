@@ -85,3 +85,26 @@ def counts(hours: float) -> dict:
     out = {r["action"]: r["n"] for r in rows}
     out["total"] = sum(out.values())
     return out
+
+
+def init_feedback() -> None:
+    with _conn() as c:
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                ticket_id INTEGER,
+                subject TEXT,
+                correction TEXT,
+                author TEXT
+            )"""
+        )
+
+
+def record_feedback(ticket_id: int, subject: str, correction: str, author: str) -> None:
+    init_feedback()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO feedback (ts, ticket_id, subject, correction, author) VALUES (?,?,?,?,?)",
+            (time.time(), ticket_id, subject[:200], correction[:2000], author[:100]),
+        )

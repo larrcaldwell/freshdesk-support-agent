@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from . import store
+from . import store, training
 from .config import settings
 
 router = APIRouter()
@@ -45,6 +45,21 @@ def _badge(action: str) -> str:
     return f'<span class="badge" style="color:{fg};background:{bg}">{label}</span>'
 
 
+
+def _teach_form(e: dict) -> str:
+    subj = html.escape(e.get("subject") or "", quote=True)
+    return (
+        "<details class='teach'><summary>&#128172; Teach</summary>"
+        "<form method='post' action='/feedback'>"
+        f"<input type='hidden' name='ticket_id' value='{e.get('ticket_id') or 0}'>"
+        f"<input type='hidden' name='subject' value='{subj}'>"
+        "<textarea name='correction' required placeholder=\"What was wrong, or what should it have said? e.g. 'Never offer replacements before troubleshooting' or 'The user limit on Pro is 25'\"></textarea><br>"
+        "<input type='text' name='author' placeholder='Your name (optional)'>"
+        "<br><button type='submit'>Teach the agent</button>"
+        "</form></details>"
+    )
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     if not settings.dashboard_key:
@@ -62,6 +77,10 @@ def dashboard(request: Request) -> HTMLResponse:
     day = store.counts(24)
     week = store.counts(24 * 7)
     events = store.recent(50)
+    try:
+        teachings = len(training.load_corrections())
+    except Exception:
+        teachings = "–"
     fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
 
     rows = []
@@ -77,6 +96,7 @@ def dashboard(request: Request) -> HTMLResponse:
             f"<td>{html.escape(e['sentiment'] or '–')}</td>"
             f"<td>{conf}</td><td>{human}</td><td>{_badge(e['action'])}"
             + (f"<div class='detail'>{detail}</div>" if e["action"] == "error" and detail else "")
+            + _teach_form(e)
             + "</td></tr>"
         )
     table = "".join(rows) or "<tr><td colspan='8' class='empty'>No activity since the app last restarted. New tickets will appear here automatically.</td></tr>"
@@ -115,6 +135,14 @@ def dashboard(request: Request) -> HTMLResponse:
  .subj {{ max-width:320px; }}
  .detail {{ color:#c0392b; font-size:12px; margin-top:4px; }}
  .empty {{ text-align:center; color:#75808e; padding:28px; }}
+ details.teach {{ margin-top:6px; }}
+ details.teach summary {{ cursor:pointer; color:#08974b; font-size:12px; font-weight:600; list-style:none; }}
+ details.teach summary:hover {{ text-decoration:underline; }}
+ details.teach form {{ margin-top:8px; background:#f4faf1; border:1px solid #d7f0c9; border-radius:10px; padding:10px; }}
+ details.teach textarea {{ width:100%; box-sizing:border-box; min-height:64px; border:1px solid #cfd8d4; border-radius:8px; padding:8px; font-family:inherit; font-size:13px; }}
+ details.teach input[type=text] {{ border:1px solid #cfd8d4; border-radius:8px; padding:6px 8px; font-family:inherit; font-size:12.5px; margin-top:6px; }}
+ details.teach button {{ background:#08974b; color:#fff; border:none; border-radius:8px; padding:7px 14px; font-weight:600; font-size:12.5px; margin-top:8px; cursor:pointer; }}
+ details.teach button:hover {{ background:#067a3d; }}
  footer {{ color:#75808e; font-size:12px; margin:18px 4px; }}
 </style></head>
 <body>
@@ -128,6 +156,7 @@ def dashboard(request: Request) -> HTMLResponse:
   {stat("Auto-replied · 24h", day.get("auto-replied", 0))}
   {stat("Errors · 24h", day.get("error", 0))}
   {stat("Handled · 7 days", week.get("total", 0))}
+  {stat("Team teachings", teachings)}
  </div>
  <table>
   <tr><th>When</th><th>Ticket</th><th>Subject</th><th>Category</th><th>Sentiment</th><th>Confidence</th><th>Needs human</th><th>Result</th></tr>

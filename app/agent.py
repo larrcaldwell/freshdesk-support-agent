@@ -14,6 +14,7 @@ import anthropic
 from .config import settings
 from .freshdesk import fd, strip_html
 from .knowledge import search_docs
+from . import training
 
 log = logging.getLogger("agent")
 
@@ -151,7 +152,7 @@ Your job: suggest the next reply the HUMAN AGENT should send.
 def handle_chat(transcript: str) -> dict:
     """Run the agent on a live chat transcript. Returns the submit_result payload."""
     messages = [{"role": "user", "content": f"Live chat so far:\n\n{transcript}\n\nSuggest the agent's next reply."}]
-    system = CHAT_SYSTEM.format(company=settings.company_name)
+    system = CHAT_SYSTEM.format(company=settings.company_name) + training.corrections_block()
 
     for _ in range(8):
         resp = client.messages.create(
@@ -182,7 +183,7 @@ def handle_ticket(ticket: dict) -> dict:
     structured submit_result payload."""
     ticket_text = fd.ticket_to_text(ticket)
     messages = [{"role": "user", "content": f"Handle this support ticket:\n\n{ticket_text}"}]
-    system = SYSTEM.format(company=settings.company_name, signature=settings.agent_signature)
+    system = SYSTEM.format(company=settings.company_name, signature=settings.agent_signature) + training.corrections_block()
 
     for _ in range(12):  # hard cap on loop iterations
         resp = client.messages.create(
