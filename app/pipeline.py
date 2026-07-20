@@ -111,6 +111,11 @@ def process_ticket(ticket_id: int) -> None:
     if ticket.get("spam"):
         log.info("Ticket #%s marked spam; skipping", ticket_id)
         return
+    if "ai-training-log" in (ticket.get("tags") or []) or (ticket.get("subject") or "").startswith(
+        "AI Agent Training Log"
+    ):
+        log.info("Ticket #%s is the training log; skipping", ticket_id)
+        return
 
     verdict = handle_ticket(ticket)
     try:
