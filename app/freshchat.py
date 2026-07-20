@@ -22,9 +22,10 @@ log = logging.getLogger("freshchat")
 
 _client: httpx.Client | None = None
 _default_agent_id: str | None = None
-_last_run: dict[str, float] = {}  # conversation_id -> monotonic ts (throttle)
+_seq: dict[str, int] = {}                 # conversation_id -> latest webhook sequence
+_last_suggested: dict[str, str] = {}      # conversation_id -> last customer line we answered
 
-THROTTLE_SECONDS = 20
+DEBOUNCE_SECONDS = 12  # wait for the customer to finish typing a burst of messages
 
 
 def enabled() -> bool:
@@ -112,17 +113,24 @@ def process_chat_message(conversation_id: str) -> None:
         log.warning("Freshchat copilot called but not configured")
         return
 
-    now = time.monotonic()
-    if now - _last_run.get(conversation_id, 0) < THROTTLE_SECONDS:
-        log.info("Chat %s throttled", conversation_id)
+    # Debounce: if the customer sends several messages in a burst, only the
+    # task for the LAST message survives; earlier ones exit here.
+    my_seq = _seq.get(conversation_id, 0) + 1
+    _seq[conversation_id] = my_seq
+    time.sleep(DEBOUNCE_SECONDS)
+    if _seq.get(conversation_id) != my_seq:
+        log.info("Chat %s: superseded by newer message; skipping", conversation_id)
         return
-    _last_run[conversation_id] = now
 
     transcript, agent_id, resolved = _transcript(conversation_id)
     if resolved or not transcript.strip():
         return
-    if not transcript.rstrip().splitlines()[-1].startswith("CUSTOMER:"):
+    last_line = transcript.rstrip().splitlines()[-1]
+    if not last_line.startswith("CUSTOMER:"):
         log.info("Chat %s: last message not from customer; skipping", conversation_id)
+        return
+    if _last_suggested.get(conversation_id) == last_line:
+        log.info("Chat %s: already suggested for this message; skipping", conversation_id)
         return
 
     from .agent import handle_chat  # late import to avoid cycles
@@ -140,18 +148,20 @@ def process_chat_message(conversation_id: str) -> None:
     if verdict.get("needs_human"):
         note_lines.append(f"Why: {verdict.get('reasoning', '')[:300]}")
     post_private_note(conversation_id, "\n".join(note_lines), agent_id)
+    _last_suggested[conversation_id] = last_line
 
     first_customer_line = next(
         (l[10:] for l in transcript.splitlines() if l.startswith("CUSTOMER: ")), ""
     )
     store.record(
         0,
-        subject=f"[live chat] {first_customer_line[:120]}",
+        subject=f"[live chat] {first_customer_line[:120] or conversation_id}",
         category=verdict.get("category") or "",
         priority=verdict.get("priority") or "",
         sentiment=verdict.get("sentiment") or "",
         confidence=verdict.get("confidence"),
         needs_human=verdict.get("needs_human"),
         action="chat-copilot",
+        ref=conversation_id,
     )
     log.info("Chat %s: suggestion posted", conversation_id)

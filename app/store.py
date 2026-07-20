@@ -32,7 +32,8 @@ def init() -> None:
                 confidence INTEGER,
                 needs_human INTEGER,
                 action TEXT,          -- auto-replied | draft-posted | triage-only | error
-                detail TEXT
+                detail TEXT,
+                ref TEXT              -- stable key (e.g. chat conversation id) for upserts
             )"""
         )
 
@@ -47,12 +48,15 @@ def record(
     needs_human: bool | None = None,
     action: str = "",
     detail: str = "",
+    ref: str = "",
 ) -> None:
     init()
     with _conn() as c:
+        if ref:
+            c.execute("DELETE FROM events WHERE ref = ?", (ref,))
         c.execute(
             "INSERT INTO events (ts, ticket_id, subject, category, priority, sentiment,"
-            " confidence, needs_human, action, detail) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " confidence, needs_human, action, detail, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
                 time.time(),
                 ticket_id,
@@ -64,6 +68,7 @@ def record(
                 None if needs_human is None else int(needs_human),
                 action,
                 detail[:500],
+                ref,
             ),
         )
 
