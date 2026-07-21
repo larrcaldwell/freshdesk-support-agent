@@ -149,10 +149,12 @@ Your job: suggest the next reply the HUMAN AGENT should send.
   (plain text, no signature)."""
 
 
-def handle_chat(transcript: str) -> dict:
+def handle_chat(transcript: str, ref: str = "") -> dict:
     """Run the agent on a live chat transcript. Returns the submit_result payload."""
     messages = [{"role": "user", "content": f"Live chat so far:\n\n{transcript}\n\nSuggest the agent's next reply."}]
-    system = CHAT_SYSTEM.format(company=settings.company_name) + training.corrections_block()
+    corrections = training.corrections_block()
+    system = CHAT_SYSTEM.format(company=settings.company_name) + corrections
+    trace: list = []
 
     for _ in range(8):
         resp = client.messages.create(
@@ -170,10 +172,12 @@ def handle_chat(transcript: str) -> dict:
         results = []
         for tu in tool_uses:
             if tu.name == "submit_result":
-                return dict(tu.input)
-            results.append(
-                {"type": "tool_result", "tool_use_id": tu.id, "content": _run_tool(tu.name, dict(tu.input))}
-            )
+                verdict = dict(tu.input)
+                _journal_safe("chat", ref, transcript, corrections, trace, verdict)
+                return verdict
+            out = _run_tool(tu.name, dict(tu.input))
+            trace.append({"tool": tu.name, "input": dict(tu.input), "result_preview": out[:500]})
+            results.append({"type": "tool_result", "tool_use_id": tu.id, "content": out})
         messages.append({"role": "user", "content": results})
     raise RuntimeError("Chat agent did not submit a result within the iteration limit")
 
@@ -183,7 +187,9 @@ def handle_ticket(ticket: dict) -> dict:
     structured submit_result payload."""
     ticket_text = fd.ticket_to_text(ticket)
     messages = [{"role": "user", "content": f"Handle this support ticket:\n\n{ticket_text}"}]
-    system = SYSTEM.format(company=settings.company_name, signature=settings.agent_signature) + training.corrections_block()
+    corrections = training.corrections_block()
+    system = SYSTEM.format(company=settings.company_name, signature=settings.agent_signature) + corrections
+    trace: list = []
 
     for _ in range(12):  # hard cap on loop iterations
         resp = client.messages.create(
@@ -204,11 +210,24 @@ def handle_ticket(ticket: dict) -> dict:
         results = []
         for tu in tool_uses:
             if tu.name == "submit_result":
-                log.info("Ticket #%s verdict: %s", ticket["id"], json.dumps(tu.input)[:500])
-                return dict(tu.input)
-            results.append(
-                {"type": "tool_result", "tool_use_id": tu.id, "content": _run_tool(tu.name, dict(tu.input))}
-            )
+                verdict = dict(tu.input)
+                log.info("Ticket #%s verdict: %s", ticket["id"], json.dumps(verdict)[:500])
+                _journal_safe("ticket", str(ticket["id"]), ticket_text, corrections, trace, verdict)
+                return verdict
+            out = _run_tool(tu.name, dict(tu.input))
+            trace.append({"tool": tu.name, "input": dict(tu.input), "result_preview": out[:500]})
+            results.append({"type": "tool_result", "tool_use_id": tu.id, "content": out})
         messages.append({"role": "user", "content": results})
 
     raise RuntimeError("Agent did not submit a result within the iteration limit")
+
+
+def _journal_safe(kind: str, ref: str, input_text: str, corrections: str, trace: list, verdict: dict) -> None:
+    """Record the full decision trace for auditing and model-training exports."""
+    try:
+        from . import store
+
+        n = corrections.count("\n") - 2 if corrections else 0
+        store.journal(kind, ref, input_text, max(n, 0), trace, verdict)
+    except Exception:
+        log.exception("journal write failed (continuing)")

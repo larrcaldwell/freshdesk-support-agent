@@ -135,6 +135,10 @@ def dashboard(request: Request) -> HTMLResponse:
  .subj {{ max-width:320px; }}
  .detail {{ color:#c0392b; font-size:12px; margin-top:4px; }}
  .empty {{ text-align:center; color:#75808e; padding:28px; }}
+ a.cardlink {{ text-decoration:none; display:block; border:1px solid #5cdd31; }}
+ a.cardlink:hover {{ background:#f4faf1; text-decoration:none; }}
+ .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
+ .titem .n {{ color:#08974b; font-weight:700; margin-right:8px; }}
  details.teach {{ margin-top:6px; }}
  details.teach summary {{ cursor:pointer; color:#08974b; font-size:12px; font-weight:600; list-style:none; }}
  details.teach summary:hover {{ text-decoration:underline; }}
@@ -156,13 +160,13 @@ def dashboard(request: Request) -> HTMLResponse:
   {stat("Auto-replied · 24h", day.get("auto-replied", 0))}
   {stat("Errors · 24h", day.get("error", 0))}
   {stat("Handled · 7 days", week.get("total", 0))}
-  {stat("Team teachings", teachings)}
+  <a class='card cardlink' href='/teachings'><div class='num'>{teachings}</div><div class='lbl'>Team teachings →</div></a>
  </div>
  <table>
   <tr><th>When</th><th>Ticket</th><th>Subject</th><th>Category</th><th>Sentiment</th><th>Confidence</th><th>Needs human</th><th>Result</th></tr>
   {table}
  </table>
- <footer>Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
+ <footer><a href='/journal.jsonl'>&#11015; Download reasoning journal (.jsonl)</a> — every decision with its research trail and reasoning, for audits or model training.<br>Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
  History resets if the app restarts (free hosting tier). "Needs human: Yes" = the agent wants one of you to review before anything goes out.</footer>
 </div></body></html>"""
 
@@ -170,3 +174,52 @@ def dashboard(request: Request) -> HTMLResponse:
     if request.query_params.get("key") == settings.dashboard_key:
         resp.set_cookie("fd_agent_key", settings.dashboard_key, max_age=60 * 60 * 24 * 90, httponly=True)
     return resp
+
+
+@router.get("/teachings", response_class=HTMLResponse)
+def teachings_page(request: Request) -> HTMLResponse:
+    if not settings.dashboard_key:
+        return HTMLResponse("<h3>Dashboard disabled.</h3>", status_code=503)
+    supplied = request.query_params.get("key") or request.cookies.get("fd_agent_key")
+    if supplied != settings.dashboard_key:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Access key required.</h3>", status_code=401)
+
+    from . import training as _training
+
+    try:
+        items = _training.load_corrections()
+    except Exception:
+        items = []
+    try:
+        tid = _training._find_or_create_ticket()
+        fd_link = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets/{tid}"
+    except Exception:
+        fd_link = "#"
+
+    rows = "".join(
+        f"<div class='titem'><span class='n'>{i}.</span>{html.escape(c)}</div>"
+        for i, c in enumerate(items, 1)
+    ) or "<div class='titem'>Nothing taught yet — use the &#128172; Teach link on any dashboard row.</div>"
+
+    body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team teachings — truDigital AI Support Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+ body {{ font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
+ header {{ background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; }}
+ header img {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; }}
+ .wrap {{ max-width:900px; margin:22px auto; padding:0 16px; }}
+ .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
+ .titem .n {{ color:#08974b; font-weight:700; margin-right:8px; }}
+ a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+ .meta {{ color:#75808e; font-size:12.5px; margin:14px 2px; }}
+</style></head><body>
+<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Team teachings</h1>
+<span style="color:#75808e;font-size:12.5px">{len(items)} rule{'s' if len(items) != 1 else ''} the agent follows on every draft — newest first</span></header>
+<div class="wrap">
+ <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
+ <a href="{fd_link}" target="_blank">Edit in Freshdesk (AI Training Log ticket)</a> — add a [teach] note there or use the Teach button on the dashboard.</div>
+ {rows}
+</div></body></html>"""
+    return HTMLResponse(body)

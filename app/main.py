@@ -11,7 +11,7 @@ import hmac
 import logging
 
 from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from . import freshchat, store, training
 from .config import settings
@@ -72,6 +72,28 @@ async def ticket_webhook(
 
     background.add_task(_safe_process, ticket_id)
     return {"accepted": True, "ticket_id": ticket_id}
+
+
+@app.get("/journal.jsonl")
+def journal_export(request: Request) -> PlainTextResponse:
+    """Reasoning journal export (one JSON object per line) for training pipelines."""
+    import json as _json
+
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+    lines = []
+    for row in reversed(store.journal_rows()):
+        try:
+            row["trace"] = _json.loads(row.get("trace") or "[]")
+            row["verdict"] = _json.loads(row.get("verdict") or "{}")
+        except Exception:
+            pass
+        lines.append(_json.dumps(row, ensure_ascii=False))
+    return PlainTextResponse(
+        "\n".join(lines),
+        headers={"Content-Disposition": "attachment; filename=reasoning-journal.jsonl"},
+    )
 
 
 @app.post("/feedback")

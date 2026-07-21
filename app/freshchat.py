@@ -135,7 +135,7 @@ def process_chat_message(conversation_id: str) -> None:
 
     from .agent import handle_chat  # late import to avoid cycles
 
-    verdict = handle_chat(transcript)
+    verdict = handle_chat(transcript, ref=conversation_id)
     reply = (verdict.get("reply") or "").strip()
 
     note_lines = ["🤖 [ai-agent] Suggested reply (private — customer can't see this):", ""]

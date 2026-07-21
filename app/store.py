@@ -113,3 +113,45 @@ def record_feedback(ticket_id: int, subject: str, correction: str, author: str) 
             "INSERT INTO feedback (ts, ticket_id, subject, correction, author) VALUES (?,?,?,?,?)",
             (time.time(), ticket_id, subject[:200], correction[:2000], author[:100]),
         )
+
+
+def init_journal() -> None:
+    with _conn() as c:
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                kind TEXT,             -- ticket | chat
+                ref TEXT,              -- ticket id or conversation id
+                input TEXT,            -- what the agent was given (excerpt)
+                teachings INTEGER,     -- number of team teachings active at the time
+                trace TEXT,            -- JSON list of tool calls + result previews
+                verdict TEXT           -- JSON final decision incl. reply + reasoning
+            )"""
+        )
+
+
+def journal(kind: str, ref: str, input_text: str, teachings: int, trace: list, verdict: dict) -> None:
+    import json as _json
+
+    init_journal()
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO journal (ts, kind, ref, input, teachings, trace, verdict) VALUES (?,?,?,?,?,?,?)",
+            (
+                time.time(),
+                kind,
+                str(ref),
+                input_text[:2000],
+                teachings,
+                _json.dumps(trace)[:8000],
+                _json.dumps(verdict)[:6000],
+            ),
+        )
+
+
+def journal_rows(limit: int = 2000) -> list[dict]:
+    init_journal()
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM journal ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
