@@ -61,6 +61,10 @@ def _access_token() -> str:
     return _token[1]
 
 
+class UPSError(Exception):
+    """Carries UPS's human-readable error message."""
+
+
 def _post(path: str, payload: dict) -> dict:
     r = httpx.post(
         f"{settings.ups_api_url}{path}",
@@ -70,7 +74,12 @@ def _post(path: str, payload: dict) -> dict:
     )
     if r.status_code >= 400:
         log.error("UPS POST %s -> %s: %s", path, r.status_code, r.text[:800])
-    r.raise_for_status()
+        try:
+            errs = (r.json().get("response") or {}).get("errors") or []
+            msg = "; ".join(e.get("message", "") for e in errs if e.get("message"))
+        except Exception:
+            msg = ""
+        raise UPSError(msg or f"UPS returned HTTP {r.status_code}")
     return r.json()
 
 
@@ -128,10 +137,11 @@ def _packages(prep: dict, for_shipping: bool) -> list[dict]:
     return out
 
 
-def shop_rates(prep: dict) -> list[dict] | None:
-    """All service options with prices for this prep sheet. None on failure."""
+def shop_rates(prep: dict) -> tuple[list[dict] | None, str]:
+    """All service options with prices for this prep sheet.
+    Returns (rates, error_message) — rates is None on failure."""
     if not enabled() or not prep.get("packing"):
-        return None
+        return None, "UPS is not configured or the order has no player boxes."
     payload = {
         "RateRequest": {
             "Request": {"RequestOption": "Shop"},
@@ -146,9 +156,11 @@ def shop_rates(prep: dict) -> list[dict] | None:
     }
     try:
         data = _post("/api/rating/v1/Shop", payload)
+    except UPSError as e:
+        return None, str(e)
     except Exception:
         log.exception("UPS Shop rates failed")
-        return None
+        return None, "Could not reach UPS — try again in a minute."
     rated = (data.get("RateResponse") or {}).get("RatedShipment") or []
     if isinstance(rated, dict):
         rated = [rated]
@@ -169,13 +181,14 @@ def shop_rates(prep: dict) -> list[dict] | None:
             }
         )
     out.sort(key=lambda x: float(x["price"] or 9e9))
-    return out
+    return out, ""
 
 
-def create_label(prep: dict, service_code: str) -> dict | None:
-    """Create the shipment (bills the UPS account) and return tracking + labels."""
+def create_label(prep: dict, service_code: str) -> tuple[dict | None, str]:
+    """Create the shipment (bills the UPS account) and return tracking + labels.
+    Returns (result, error_message) — result is None on failure."""
     if not enabled() or not prep.get("packing"):
-        return None
+        return None, "UPS is not configured or the order has no player boxes."
     payload = {
         "ShipmentRequest": {
             "Request": {"RequestOption": "nonvalidate"},
@@ -202,9 +215,11 @@ def create_label(prep: dict, service_code: str) -> dict | None:
     }
     try:
         data = _post("/api/shipments/v1/ship", payload)
+    except UPSError as e:
+        return None, str(e)
     except Exception:
         log.exception("UPS create shipment failed")
-        return None
+        return None, "Could not reach UPS — try again in a minute."
     results = (data.get("ShipmentResponse") or {}).get("ShipmentResults") or {}
     pkg = results.get("PackageResults") or []
     if isinstance(pkg, dict):
@@ -227,4 +242,4 @@ def create_label(prep: dict, service_code: str) -> dict | None:
         "labels": labels,
         "charge": charge,
         "service": SERVICE_NAMES.get(service_code, service_code),
-    }
+    }, ""

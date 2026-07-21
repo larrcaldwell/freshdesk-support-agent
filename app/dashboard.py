@@ -565,9 +565,54 @@ def _ship_auth(request: Request):
     return None
 
 
+ADDR_FIELDS = ("attention", "line1", "line2", "city", "state", "zip")
+
+
+def _addr_overrides(prep: dict, params) -> None:
+    """Apply rep-edited ship-to fields (query or form params) onto the prep sheet."""
+    addr = prep.get("addr") or {}
+    changed = False
+    for f in ADDR_FIELDS:
+        v = params.get(f"a_{f}")
+        if v is not None:
+            addr[f] = str(v).strip()
+            changed = True
+    if changed:
+        addr["state"] = (addr.get("state") or "").upper()[:2]
+        prep["addr"] = addr
+        prep["address"] = ", ".join(
+            x for x in [
+                addr.get("attention"), addr.get("line1"), addr.get("line2"), addr.get("city"),
+                f"{addr.get('state', '')} {addr.get('zip', '')}".strip(), addr.get("country"),
+            ] if x
+        )
+
+
+def _addr_form_fields(prep: dict, hidden: bool) -> str:
+    a = prep.get("addr") or {}
+    if hidden:
+        return "".join(
+            f"<input type='hidden' name='a_{f}' value='{html.escape(a.get(f) or '', quote=True)}'>"
+            for f in ADDR_FIELDS
+        )
+    labels = {
+        "attention": ("Attention / recipient", 30), "line1": ("Address line 1", 40),
+        "line2": ("Address line 2", 25), "city": ("City", 20), "state": ("State (2 letters)", 6), "zip": ("ZIP", 10),
+    }
+    rows = []
+    for f in ADDR_FIELDS:
+        lbl, size = labels[f]
+        rows.append(
+            f"<label style='font-size:12px;color:#75808e;display:inline-block;margin:4px 8px 0 0'>{lbl}<br>"
+            f"<input type='text' name='a_{f}' size='{size}' value='{html.escape(a.get(f) or '', quote=True)}' "
+            f"style='border:1px solid #cfd8d4;border-radius:8px;padding:7px 9px;font-family:inherit;font-size:13.5px;color:#20344c'></label>"
+        )
+    return "".join(rows)
+
+
 @router.get("/shipping/rates", response_class=HTMLResponse)
 def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
-    """Live UPS prices for one order; rep picks a service and creates the label."""
+    """Live UPS prices for one order; rep can fix the address and pick a service."""
     denied = _ship_auth(request)
     if denied:
         return denied
@@ -576,14 +621,23 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
     prep = zoho.get_prep(so) if so else None
     if not prep:
         return HTMLResponse("<h3 style='font-family:sans-serif'>Order not found in Zoho.</h3>", status_code=404)
-    rates = ups.shop_rates(prep)
+    _addr_overrides(prep, request.query_params)
+    rates, err = ups.shop_rates(prep)
 
     plan = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in prep.get("pack_plan") or [])
+    addr_editor = (
+        f"<div class='titem'><b>Ship-to address</b> <span style='color:#75808e;font-size:12px'>— edit anything UPS complains about, then Update rates. (This changes the label only, not Zoho.)</span>"
+        f"<form method='get' action='/shipping/rates' style='margin-top:6px'>"
+        f"<input type='hidden' name='so' value='{html.escape(so, quote=True)}'>"
+        f"{_addr_form_fields(prep, hidden=False)}"
+        f"<div><button class='go' type='submit' style='padding:9px 18px;font-size:13.5px;margin-top:10px'>Update rates</button></div>"
+        f"</form></div>"
+    )
     if rates is None:
-        options = "<div class='titem'>Could not get UPS rates — check UPS credentials or try again. (Details are in the server logs.)</div>"
+        options = f"<div class='titem' style='border-left:4px solid #c0392b'><b>UPS says:</b> {html.escape(err)}<br><span style='color:#75808e;font-size:12.5px'>Fix the address above and hit Update rates.</span></div>"
         button = ""
     elif not rates:
-        options = "<div class='titem'>UPS returned no services for this address — double-check the ship-to address on the order.</div>"
+        options = "<div class='titem'>UPS returned no services for this address — double-check the ship-to address above.</div>"
         button = ""
     else:
         opts = []
@@ -608,10 +662,11 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
  <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
  <div class="titem"><b>{html.escape(prep.get('customer') or '')}</b><br>
  {prep.get('players')} player{'s' if prep.get('players') != 1 else ''} &rarr; {prep.get('boxes')} box{'es' if prep.get('boxes') != 1 else ''}, {prep.get('weight_lb')} lb total
- <div style='margin-top:4px'>{plan}</div>
- <div style='margin-top:8px'><b>Ship to:</b> {html.escape(prep.get('address') or '')}</div></div>
+ <div style='margin-top:4px'>{plan}</div></div>
+ {addr_editor}
  <form method="post" action="/shipping/label">
   <input type="hidden" name="so" value="{html.escape(so, quote=True)}">
+  {_addr_form_fields(prep, hidden=True)}
   {options}
   {button}
  </form>
@@ -634,11 +689,15 @@ async def shipping_label_create(request: Request) -> HTMLResponse:
     prep = zoho.get_prep(so) if so else None
     if not prep or not service:
         return HTMLResponse("<h3 style='font-family:sans-serif'>Missing order or service.</h3>", status_code=400)
-    result = ups.create_label(prep, service)
+    _addr_overrides(prep, form)
+    result, err = ups.create_label(prep, service)
     if not result or not result.get("labels"):
+        back = f"/shipping/rates?so={html.escape(so, quote=True)}"
         return HTMLResponse(
-            "<h3 style='font-family:sans-serif'>UPS could not create the label.</h3>"
-            "<p style='font-family:sans-serif'>Usually an address issue — check the ship-to address in Zoho and try again.</p>",
+            "<div style='font-family:sans-serif;max-width:640px;margin:40px auto'>"
+            "<h3>UPS could not create the label.</h3>"
+            f"<p><b>UPS says:</b> {html.escape(err or 'unknown error')}</p>"
+            f"<p><a href='{back}'>&larr; Go back, fix the address, and try again</a></p></div>",
             status_code=502,
         )
     sid = store.record_shipment(

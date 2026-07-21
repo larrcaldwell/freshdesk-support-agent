@@ -78,6 +78,30 @@ def _is_player_item(name: str) -> bool:
     return "player" in (name or "").lower()
 
 
+US_STATES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
+    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV", "new hampshire": "NH",
+    "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
+    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", "tennessee": "TN",
+    "texas": "TX", "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC",
+}
+
+
+def state_code(addr: dict) -> str:
+    """Best-effort 2-letter state code from a Zoho address."""
+    sc = (addr.get("state_code") or "").strip()
+    if len(sc) == 2:
+        return sc.upper()
+    name = (addr.get("state") or sc or "").strip().lower()
+    return US_STATES.get(name, sc.upper()[:2])
+
+
 # Shipping box tiers: (max players, (L, W, H) in inches)
 BOX_TIERS = [
     (2, (9, 6, 4)),
@@ -239,7 +263,7 @@ def _prep(o: dict, detail: dict) -> dict:
             "line1": addr.get("address") or "",
             "line2": addr.get("street2") or "",
             "city": addr.get("city") or "",
-            "state": addr.get("state_code") or "",
+            "state": state_code(addr),
             "zip": addr.get("zip") or "",
             "country": addr.get("country_code") or "US",
         },
