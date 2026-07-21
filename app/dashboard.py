@@ -166,8 +166,8 @@ def dashboard(request: Request) -> HTMLResponse:
   <tr><th>When</th><th>Ticket</th><th>Subject</th><th>Category</th><th>Sentiment</th><th>Confidence</th><th>Needs human</th><th>Result</th></tr>
   {table}
  </table>
- <footer><a href='/journal.jsonl'>&#11015; Download reasoning journal (.jsonl)</a> — every decision with its research trail and reasoning, for audits or model training.<br>Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
- History resets if the app restarts (free hosting tier). "Needs human: Yes" = the agent wants one of you to review before anything goes out.</footer>
+ <footer><a href='/export.zip'>&#11015; Export all data (.zip)</a> — reasoning journal + activity log + teachings in one bundle, for audits or model training. (Journal alone: <a href='/journal.jsonl'>.jsonl</a>)<br>Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
+ "Needs human: Yes" = the agent wants one of you to review before anything goes out.</footer>
 </div></body></html>"""
 
     resp = HTMLResponse(body)

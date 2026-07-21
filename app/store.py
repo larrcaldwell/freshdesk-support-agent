@@ -1,15 +1,21 @@
 """Lightweight SQLite event log for the dashboard.
 
-Lives in /tmp — on Render's free tier this resets when the service restarts
-or spins down, so the dashboard shows recent activity, not full history.
+Lives in DATA_DIR (a Render persistent disk, e.g. /data) when that env var is
+set; otherwise falls back to /tmp (which resets on restart/deploy).
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from pathlib import Path
 
-DB = Path("/tmp/agent_events.db")
+_data_dir = Path(os.environ.get("DATA_DIR", "/tmp"))
+try:
+    _data_dir.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _data_dir = Path("/tmp")
+DB = _data_dir / "agent_events.db"
 
 
 def _conn() -> sqlite3.Connection:

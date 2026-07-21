@@ -11,7 +11,7 @@ import hmac
 import logging
 
 from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import freshchat, store, training
 from .config import settings
@@ -93,6 +93,68 @@ def journal_export(request: Request) -> PlainTextResponse:
     return PlainTextResponse(
         "\n".join(lines),
         headers={"Content-Disposition": "attachment; filename=reasoning-journal.jsonl"},
+    )
+
+
+@app.get("/export.zip")
+def export_zip(request: Request) -> Response:
+    """One-click clean export: reasoning journal + activity log + teachings, zipped."""
+    import csv
+    import io
+    import json as _json
+    import time as _time
+    import zipfile
+
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+
+    stamp = _time.strftime("%Y-%m-%d")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        # 1) Reasoning journal — one JSON object per line, oldest first
+        lines = []
+        for row in reversed(store.journal_rows(limit=100000)):
+            try:
+                row["trace"] = _json.loads(row.get("trace") or "[]")
+                row["verdict"] = _json.loads(row.get("verdict") or "{}")
+            except Exception:
+                pass
+            lines.append(_json.dumps(row, ensure_ascii=False))
+        z.writestr("reasoning-journal.jsonl", "\n".join(lines))
+
+        # 2) Activity log — every dashboard event as CSV
+        events = store.recent(limit=100000)
+        out = io.StringIO()
+        if events:
+            w = csv.DictWriter(out, fieldnames=list(events[0].keys()))
+            w.writeheader()
+            w.writerows(events)
+        z.writestr("activity-log.csv", out.getvalue())
+
+        # 3) Team teachings — the live rules the agent follows
+        teachings = training.load_corrections()
+        z.writestr(
+            "team-teachings.md",
+            "# Team teachings (newest first)\n\n"
+            + ("\n\n".join(f"{i}. {t}" for i, t in enumerate(teachings, 1)) or "(none yet)"),
+        )
+
+        z.writestr(
+            "README.txt",
+            f"truDigital AI Support Agent — data export {stamp}\n\n"
+            "reasoning-journal.jsonl  Every agent decision: input, research trail (tool\n"
+            "                         calls + results), teachings active, final verdict\n"
+            "                         with reply + reasoning. One JSON object per line —\n"
+            "                         suitable for model training pipelines.\n"
+            "activity-log.csv         Dashboard event history (triage results, confidence,\n"
+            "                         needs-human flags).\n"
+            "team-teachings.md        Corrections the team has taught the agent.\n",
+        )
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=trudigital-ai-agent-export-{stamp}.zip"},
     )
 
 
