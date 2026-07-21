@@ -25,6 +25,16 @@ log = logging.getLogger("pipeline")
 
 BOT_MARKER = "[ai-agent]"  # embedded in notes/tags so we can detect our own activity
 
+# Freshdesk ticket "source" codes → human-readable channel
+SOURCE_CHANNEL = {
+    1: "email",
+    2: "portal",
+    3: "phone",
+    7: "chat",
+    9: "feedback-widget",
+    10: "outbound-email",
+}
+
 
 def _to_html(text: str) -> str:
     paragraphs = [f"<p>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in text.split("\n\n") if p.strip()]
@@ -160,4 +170,5 @@ def process_ticket(ticket_id: int) -> None:
         confidence=verdict.get("confidence"),
         needs_human=verdict.get("needs_human"),
         action=action,
+        channel=SOURCE_CHANNEL.get(ticket.get("source"), "other"),
     )

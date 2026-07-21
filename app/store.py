@@ -39,9 +39,15 @@ def init() -> None:
                 needs_human INTEGER,
                 action TEXT,          -- auto-replied | draft-posted | triage-only | error
                 detail TEXT,
-                ref TEXT              -- stable key (e.g. chat conversation id) for upserts
+                ref TEXT,             -- stable key (e.g. chat conversation id) for upserts
+                channel TEXT          -- email | portal | phone | chat | live-chat | ...
             )"""
         )
+        # Migration for databases created before the channel column existed.
+        try:
+            c.execute("ALTER TABLE events ADD COLUMN channel TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
 def record(
@@ -55,6 +61,7 @@ def record(
     action: str = "",
     detail: str = "",
     ref: str = "",
+    channel: str = "",
 ) -> None:
     init()
     with _conn() as c:
@@ -62,7 +69,7 @@ def record(
             c.execute("DELETE FROM events WHERE ref = ?", (ref,))
         c.execute(
             "INSERT INTO events (ts, ticket_id, subject, category, priority, sentiment,"
-            " confidence, needs_human, action, detail, ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " confidence, needs_human, action, detail, ref, channel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 time.time(),
                 ticket_id,
@@ -75,6 +82,7 @@ def record(
                 action,
                 detail[:500],
                 ref,
+                channel,
             ),
         )
 
@@ -83,6 +91,20 @@ def recent(limit: int = 50) -> list[dict]:
     init()
     with _conn() as c:
         rows = c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def events_since(hours: float | None = None, limit: int = 2000) -> list[dict]:
+    """All events, newest first, optionally restricted to the last N hours."""
+    init()
+    with _conn() as c:
+        if hours:
+            since = time.time() - hours * 3600
+            rows = c.execute(
+                "SELECT * FROM events WHERE ts > ? ORDER BY id DESC LIMIT ?", (since, limit)
+            ).fetchall()
+        else:
+            rows = c.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
 
 

@@ -163,5 +163,6 @@ def process_chat_message(conversation_id: str) -> None:
         needs_human=verdict.get("needs_human"),
         action="chat-copilot",
         ref=conversation_id,
+        channel="live-chat",
     )
     log.info("Chat %s: suggestion posted", conversation_id)
