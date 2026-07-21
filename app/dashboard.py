@@ -475,13 +475,12 @@ def shipping(request: Request) -> HTMLResponse:
                 rma = (f" &nbsp;·&nbsp; <a href='{fd_url}/{s['rma_ticket']}' target='_blank'>RMA ticket #{s['rma_ticket']}</a>"
                        if s["rma_ticket"] else "")
                 goods = f"<br><b>Also in order:</b> {html.escape(', '.join(s['other_goods']))}" if s["other_goods"] else ""
-                box_note = f" ({settings.shipping_box_dims})" if settings.shipping_box_dims else ""
+                plan_lines = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in s.get("pack_plan") or [])
                 prep = (
                     f"<b>{s['players']} player{'s' if s['players'] != 1 else ''}</b> "
-                    f"&rarr; <b>{s['boxes']} shipping box{'es' if s['boxes'] != 1 else ''}</b>{box_note} "
-                    f"&nbsp;·&nbsp; est. <b>{s['weight_lb']} lb</b> "
-                    f"<span style='color:#75808e'>(player boxes {settings.player_box_dims}, "
-                    f"{settings.player_weight_lb} lb each, max {settings.players_per_shipping_box}/box)</span>"
+                    f"&rarr; <b>{s['boxes']} shipping box{'es' if s['boxes'] != 1 else ''}</b> "
+                    f"&nbsp;·&nbsp; est. <b>{s['weight_lb']} lb</b> total"
+                    f"<div style='margin-top:4px;color:#20344c'>{plan_lines}</div>"
                 ) if s["players"] else "<span style='color:#75808e'>No player items — check order contents.</span>"
                 cards.append(
                     f"<div class='titem'>"
