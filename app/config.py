@@ -61,6 +61,20 @@ class Settings:
     zoho_refresh_token: str = os.getenv("ZOHO_REFRESH_TOKEN", "")
     zoho_org_id: str = os.getenv("ZOHO_ORG_ID", "49993287")
 
+    # UPS (rate shopping + labels). All three must be set to enable.
+    ups_client_id: str = os.getenv("UPS_CLIENT_ID", "")
+    ups_client_secret: str = os.getenv("UPS_CLIENT_SECRET", "")
+    ups_account_number: str = os.getenv("UPS_ACCOUNT_NUMBER", "")
+    ups_api_url: str = os.getenv("UPS_API_URL", "https://onlinetools.ups.com")
+
+    # Ship-from (label origin)
+    ship_from_name: str = os.getenv("SHIP_FROM_NAME", "truDigital Signage")
+    ship_from_address1: str = os.getenv("SHIP_FROM_ADDRESS1", "150 W Civic Center Drive STE 150")
+    ship_from_city: str = os.getenv("SHIP_FROM_CITY", "Sandy")
+    ship_from_state: str = os.getenv("SHIP_FROM_STATE", "UT")
+    ship_from_zip: str = os.getenv("SHIP_FROM_ZIP", "84070")
+    ship_from_phone: str = os.getenv("SHIP_FROM_PHONE", "8018529898")
+
     # Shipping box rules
     players_per_shipping_box: int = int(os.getenv("PLAYERS_PER_SHIPPING_BOX", "10"))
     player_weight_lb: float = float(os.getenv("PLAYER_WEIGHT_LB", "0.5"))

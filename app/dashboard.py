@@ -439,8 +439,9 @@ def shipping(request: Request) -> HTMLResponse:
     if supplied != settings.dashboard_key:
         return HTMLResponse("<h3 style='font-family:sans-serif'>Access key required.</h3>", status_code=401)
 
-    from . import zoho
+    from . import ups, zoho
 
+    ups_ok = ups.enabled()
     fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
     zoho_url = "https://books.zoho.com/app/49993287#/salesorders"
 
@@ -482,6 +483,21 @@ def shipping(request: Request) -> HTMLResponse:
                     f"&nbsp;·&nbsp; est. <b>{s['weight_lb']} lb</b> total"
                     f"<div style='margin-top:4px;color:#20344c'>{plan_lines}</div>"
                 ) if s["players"] else "<span style='color:#75808e'>No player items — check order contents.</span>"
+                shipped = store.shipment_for_so(s["salesorder_id"])
+                if shipped:
+                    action_html = (
+                        f"<div style='margin-top:8px'>&#9989; <b>Label created</b> — {html.escape(shipped['service'] or '')} · "
+                        f"tracking {html.escape(shipped['trackings'] or '')} · "
+                        f"<a href='/shipping/label/{shipped['id']}'>View / print label</a></div>"
+                    )
+                elif s["players"] and ups_ok:
+                    action_html = (
+                        f"<div style='margin-top:10px'><a href='/shipping/rates?so={s['salesorder_id']}' "
+                        f"style='background:#08974b;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px'>"
+                        f"Get UPS rates &amp; create label &rarr;</a></div>"
+                    )
+                else:
+                    action_html = ""
                 cards.append(
                     f"<div class='titem'>"
                     f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
@@ -491,6 +507,7 @@ def shipping(request: Request) -> HTMLResponse:
                     f"<div style='margin-top:8px'>{prep}{goods}</div>"
                     f"<div style='margin-top:8px'><b>Ship to:</b> {html.escape(s['address'] or '(no address on order)')}"
                     f"{rma}</div>"
+                    f"{action_html}"
                     f"</div>"
                 )
             inner = "".join(cards)
@@ -517,6 +534,164 @@ def shipping(request: Request) -> HTMLResponse:
  <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
  <a href="{zoho_url}" target="_blank">Open sales orders in Zoho Books</a></div>
  {inner}
+</div></body></html>"""
+    return HTMLResponse(body)
+
+
+SHIP_CSS = """
+ body { font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }
+ header { background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; flex-wrap:wrap; }
+ header img { height:34px; } header h1 { font-size:17px; margin:0; font-weight:600; }
+ .wrap { max-width:820px; margin:22px auto; padding:0 16px; }
+ .titem { background:#fff; border-radius:12px; padding:16px 20px; margin-bottom:12px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }
+ a { color:#08974b; font-weight:600; text-decoration:none; } a:hover { text-decoration:underline; }
+ .meta { color:#75808e; font-size:12.5px; margin:14px 2px; }
+ label.rate { display:flex; align-items:center; gap:12px; background:#fff; border:2px solid #ebeef2; border-radius:12px; padding:14px 18px; margin-bottom:10px; cursor:pointer; font-size:14.5px; }
+ label.rate:hover { border-color:#5cdd31; }
+ label.rate input { transform:scale(1.3); }
+ .price { margin-left:auto; font-weight:700; font-size:16px; }
+ button.go { background:#08974b; color:#fff; border:none; border-radius:10px; padding:12px 24px; font-weight:700; font-size:15px; cursor:pointer; font-family:inherit; margin-top:8px; }
+ button.go:hover { background:#067a3d; }
+ @media print { header, .meta, .noprint { display:none !important; } body { background:#fff; } .wrap { margin:0; max-width:none; } img.label { page-break-after:always; } }
+"""
+
+
+def _ship_auth(request: Request):
+    if not settings.dashboard_key:
+        return HTMLResponse("<h3>Dashboard disabled.</h3>", status_code=503)
+    supplied = request.query_params.get("key") or request.cookies.get("fd_agent_key")
+    if supplied != settings.dashboard_key:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Access key required.</h3>", status_code=401)
+    return None
+
+
+@router.get("/shipping/rates", response_class=HTMLResponse)
+def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
+    """Live UPS prices for one order; rep picks a service and creates the label."""
+    denied = _ship_auth(request)
+    if denied:
+        return denied
+    from . import ups, zoho
+
+    prep = zoho.get_prep(so) if so else None
+    if not prep:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Order not found in Zoho.</h3>", status_code=404)
+    rates = ups.shop_rates(prep)
+
+    plan = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in prep.get("pack_plan") or [])
+    if rates is None:
+        options = "<div class='titem'>Could not get UPS rates — check UPS credentials or try again. (Details are in the server logs.)</div>"
+        button = ""
+    elif not rates:
+        options = "<div class='titem'>UPS returned no services for this address — double-check the ship-to address on the order.</div>"
+        button = ""
+    else:
+        opts = []
+        for i, rt in enumerate(rates):
+            days = f" · {rt['days']} business day{'s' if rt['days'] != '1' else ''}" if rt.get("days") else ""
+            tag = " (your negotiated rate)" if rt.get("negotiated") else ""
+            opts.append(
+                f"<label class='rate'><input type='radio' name='service' value='{rt['code']}' {'checked' if i == 0 else ''}>"
+                f"<span><b>UPS {html.escape(rt['name'])}</b>{days}</span>"
+                f"<span class='price'>${html.escape(str(rt['price']))}{tag}</span></label>"
+            )
+        options = "".join(opts)
+        button = "<button class='go' type='submit' onclick=\"this.disabled=true;this.textContent='Creating label…';this.form.submit()\">Create label &amp; print</button><div style='color:#75808e;font-size:12px;margin-top:6px'>This purchases the label on your UPS account.</div>"
+
+    body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UPS rates — {html.escape(prep.get('number') or '')}</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>{SHIP_CSS}</style></head><body>
+<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>UPS rates — {html.escape(prep.get('number') or '')}</h1></header>
+<div class="wrap">
+ <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
+ <div class="titem"><b>{html.escape(prep.get('customer') or '')}</b><br>
+ {prep.get('players')} player{'s' if prep.get('players') != 1 else ''} &rarr; {prep.get('boxes')} box{'es' if prep.get('boxes') != 1 else ''}, {prep.get('weight_lb')} lb total
+ <div style='margin-top:4px'>{plan}</div>
+ <div style='margin-top:8px'><b>Ship to:</b> {html.escape(prep.get('address') or '')}</div></div>
+ <form method="post" action="/shipping/label">
+  <input type="hidden" name="so" value="{html.escape(so, quote=True)}">
+  {options}
+  {button}
+ </form>
+</div></body></html>"""
+    return HTMLResponse(body)
+
+
+@router.post("/shipping/label")
+async def shipping_label_create(request: Request) -> HTMLResponse:
+    denied = _ship_auth(request)
+    if denied:
+        return denied
+    from fastapi.responses import RedirectResponse
+
+    from . import ups, zoho
+
+    form = await request.form()
+    so = str(form.get("so") or "")
+    service = str(form.get("service") or "")
+    prep = zoho.get_prep(so) if so else None
+    if not prep or not service:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Missing order or service.</h3>", status_code=400)
+    result = ups.create_label(prep, service)
+    if not result or not result.get("labels"):
+        return HTMLResponse(
+            "<h3 style='font-family:sans-serif'>UPS could not create the label.</h3>"
+            "<p style='font-family:sans-serif'>Usually an address issue — check the ship-to address in Zoho and try again.</p>",
+            status_code=502,
+        )
+    sid = store.record_shipment(
+        so, prep.get("number") or "", prep.get("customer") or "",
+        f"UPS {result['service']}", result.get("charge") or "",
+        result.get("trackings") or [], result.get("labels") or [],
+    )
+    # Best-effort: post tracking to the linked RMA ticket
+    if prep.get("rma_ticket"):
+        try:
+            from .freshdesk import fd
+
+            fd.private_note(
+                int(prep["rma_ticket"]),
+                f"<p><b>[ai-agent] Shipment created</b></p><p>Order {prep.get('number')} — UPS {result['service']}<br>"
+                f"Tracking: {', '.join(result.get('trackings') or [])}</p>",
+            )
+        except Exception:
+            log.exception("Could not post tracking note to ticket %s", prep.get("rma_ticket"))
+    return RedirectResponse(url=f"/shipping/label/{sid}", status_code=303)
+
+
+@router.get("/shipping/label/{shipment_id}", response_class=HTMLResponse)
+def shipping_label_view(request: Request, shipment_id: int) -> HTMLResponse:
+    denied = _ship_auth(request)
+    if denied:
+        return denied
+    import json as _json
+
+    s = store.get_shipment(shipment_id)
+    if not s:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Label not found.</h3>", status_code=404)
+    labels = _json.loads(s.get("labels") or "[]")
+    imgs = "".join(
+        f"<img class='label' src='data:image/gif;base64,{b64}' style='max-width:100%;background:#fff;border-radius:8px;margin-bottom:14px'>"
+        for b64 in labels
+    )
+    trackings = (s.get("trackings") or "").split(",")
+    tlinks = " · ".join(
+        f"<a href='https://www.ups.com/track?tracknum={t}' target='_blank'>{t}</a>" for t in trackings if t
+    )
+    charge = f" · ${html.escape(s['charge'])}" if s.get("charge") else ""
+    body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Label — {html.escape(s.get('so_number') or '')}</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>{SHIP_CSS}</style></head><body>
+<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Label — {html.escape(s.get('so_number') or '')} ({html.escape(s.get('customer') or '')})</h1></header>
+<div class="wrap">
+ <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
+ <div class="titem noprint"><b>{html.escape(s.get('service') or '')}</b>{charge}<br>Tracking: {tlinks}
+ <div style='margin-top:10px'><button class='go' onclick='window.print()'>&#128424; Print label{'s' if len(labels) > 1 else ''}</button></div></div>
+ {imgs}
 </div></body></html>"""
     return HTMLResponse(body)
 

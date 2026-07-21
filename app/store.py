@@ -143,6 +143,53 @@ def record_feedback(ticket_id: int, subject: str, correction: str, author: str) 
         )
 
 
+def init_shipments() -> None:
+    with _conn() as c:
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS shipments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                so_id TEXT,            -- Zoho sales order id
+                so_number TEXT,
+                customer TEXT,
+                service TEXT,
+                charge TEXT,
+                trackings TEXT,        -- comma-separated tracking numbers
+                labels TEXT            -- JSON list of base64 GIF labels
+            )"""
+        )
+
+
+def record_shipment(so_id: str, so_number: str, customer: str, service: str, charge: str, trackings: list, labels: list) -> int:
+    import json as _json
+
+    init_shipments()
+    with _conn() as c:
+        cur = c.execute(
+            "INSERT INTO shipments (ts, so_id, so_number, customer, service, charge, trackings, labels)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (time.time(), str(so_id), so_number, customer, service, charge, ",".join(trackings), _json.dumps(labels)),
+        )
+        return cur.lastrowid
+
+
+def get_shipment(shipment_id: int) -> dict | None:
+    init_shipments()
+    with _conn() as c:
+        row = c.execute("SELECT * FROM shipments WHERE id = ?", (shipment_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def shipment_for_so(so_id: str) -> dict | None:
+    init_shipments()
+    with _conn() as c:
+        row = c.execute(
+            "SELECT id, ts, so_number, service, charge, trackings FROM shipments WHERE so_id = ? ORDER BY id DESC LIMIT 1",
+            (str(so_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def init_journal() -> None:
     with _conn() as c:
         c.execute(

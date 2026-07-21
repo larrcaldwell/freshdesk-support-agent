@@ -78,29 +78,67 @@ def _is_player_item(name: str) -> bool:
     return "player" in (name or "").lower()
 
 
-# Shipping box tiers: (max players, box dimensions)
+# Shipping box tiers: (max players, (L, W, H) in inches)
 BOX_TIERS = [
-    (2, "9 x 6 x 4 in"),
-    (6, "12 x 9 x 6 in"),
-    (14, "12 x 12 x 12 in"),
-    (20, "16 x 17 x 18 in"),
+    (2, (9, 6, 4)),
+    (6, (12, 9, 6)),
+    (14, (12, 12, 12)),
+    (20, (16, 17, 18)),
 ]
 
 
-def pack_players(n: int) -> list[tuple[str, int]]:
+def _box(dims: tuple, players: int) -> dict:
+    l, w, h = dims
+    return {
+        "l": l,
+        "w": w,
+        "h": h,
+        "dims": f"{l} x {w} x {h} in",
+        "players": players,
+        "weight": round(max(players * settings.player_weight_lb, 0.5), 1),
+    }
+
+
+def pack_players(n: int) -> list[dict]:
     """Pack N players into shipping boxes: full 20-player boxes for bulk,
-    then the smallest tier that fits the remainder. Returns (dims, players) per box."""
-    out: list[tuple[str, int]] = []
+    then the smallest tier that fits the remainder."""
+    out: list[dict] = []
     max_cap, max_dims = BOX_TIERS[-1]
     while n > max_cap:
-        out.append((max_dims, max_cap))
+        out.append(_box(max_dims, max_cap))
         n -= max_cap
     if n > 0:
         for cap, dims in BOX_TIERS:
             if n <= cap:
-                out.append((dims, n))
+                out.append(_box(dims, n))
                 break
     return out
+
+
+def get_prep(salesorder_id: str) -> dict | None:
+    """Fetch one sales order fresh and return its prep sheet."""
+    if not enabled():
+        return None
+    try:
+        detail = _get(f"/salesorders/{salesorder_id}").get("salesorder") or {}
+    except Exception:
+        log.exception("Zoho get_prep failed for %s", salesorder_id)
+        return None
+    cf = detail.get("custom_field_hash") or {}
+    contact = (detail.get("contact_person_details") or [{}])
+    summary = {
+        "salesorder_id": detail.get("salesorder_id"),
+        "salesorder_number": detail.get("salesorder_number"),
+        "reference_number": detail.get("reference_number"),
+        "customer_name": detail.get("customer_name"),
+        "date": detail.get("date"),
+        "created_time": detail.get("created_time", ""),
+        "paid_status": detail.get("paid_status"),
+        "cf_ready_to_ship": cf.get("cf_ready_to_ship", ""),
+        "cf_ship_on_payment": cf.get("cf_ship_on_payment", ""),
+        "email": contact[0].get("email", "") if contact else "",
+    }
+    return _prep(summary, detail)
 
 
 def pending_shipments(force: bool = False) -> list[dict] | None:
@@ -153,8 +191,8 @@ def _prep(o: dict, detail: dict) -> dict:
     packing = pack_players(players)
     boxes = len(packing)
     pack_plan = [
-        f"{dims} — {cnt} player{'s' if cnt != 1 else ''} ({round(cnt * settings.player_weight_lb, 1)} lb)"
-        for dims, cnt in packing
+        f"{b['dims']} — {b['players']} player{'s' if b['players'] != 1 else ''} ({b['weight']} lb)"
+        for b in packing
     ]
     weight = round(players * settings.player_weight_lb, 1)
     addr = detail.get("shipping_address") or {}
@@ -192,8 +230,18 @@ def _prep(o: dict, detail: dict) -> dict:
         "players": players,
         "other_goods": other_goods,
         "boxes": boxes,
+        "packing": packing,
         "pack_plan": pack_plan,
         "weight_lb": weight,
         "address": address,
+        "addr": {
+            "attention": addr.get("attention") or "",
+            "line1": addr.get("address") or "",
+            "line2": addr.get("street2") or "",
+            "city": addr.get("city") or "",
+            "state": addr.get("state_code") or "",
+            "zip": addr.get("zip") or "",
+            "country": addr.get("country_code") or "US",
+        },
         "contact_email": o.get("email") or "",
     }
