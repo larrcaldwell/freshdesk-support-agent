@@ -208,6 +208,14 @@ def dashboard(request: Request) -> HTMLResponse:
     new_tickets = _fresh_new_tickets(24)
     new_count = len(new_tickets) if new_tickets is not None else "–"
 
+    from . import zoho
+
+    if zoho.enabled():
+        ship_orders = zoho.pending_shipments()
+        ship_count = len(ship_orders) if ship_orders is not None else "–"
+    else:
+        ship_count = "–"
+
     mode = (
         "<span class='badge' style='color:#c0392b;background:#fdeaea'>AUTO-REPLY ON</span>"
         if settings.auto_reply_enabled
@@ -272,6 +280,7 @@ def dashboard(request: Request) -> HTMLResponse:
   {stat("Auto-replied · 24h", day.get("auto-replied", 0), "/activity?f=auto-replied&r=24h")}
   {stat("Errors · 24h", day.get("error", 0), "/activity?f=error&r=24h")}
   {stat("Handled · 7 days", week.get("total", 0), "/activity?f=all&r=7d")}
+  {stat("To ship", ship_count, "/shipping")}
   <a class='card cardlink' href='/teachings'><div class='num'>{teachings}</div><div class='lbl'>Team teachings →</div></a>
  </div>
  <table class="sortable">
@@ -418,6 +427,98 @@ def activity(request: Request) -> HTMLResponse:
 </div>
 {SORT_JS}
 </body></html>"""
+    return HTMLResponse(body)
+
+
+@router.get("/shipping", response_class=HTMLResponse)
+def shipping(request: Request) -> HTMLResponse:
+    """Shipping queue: Zoho sales orders awaiting shipment, with prep sheets."""
+    if not settings.dashboard_key:
+        return HTMLResponse("<h3>Dashboard disabled.</h3>", status_code=503)
+    supplied = request.query_params.get("key") or request.cookies.get("fd_agent_key")
+    if supplied != settings.dashboard_key:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Access key required.</h3>", status_code=401)
+
+    from . import zoho
+
+    fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
+    zoho_url = "https://books.zoho.com/app/49993287#/salesorders"
+
+    if not zoho.enabled():
+        inner = (
+            "<div class='titem'><b>Zoho isn't connected yet.</b><br>"
+            "Once ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN are set on the "
+            "server, every sales order awaiting shipment will appear here automatically with "
+            "its box count, weight, and address ready for UPS.</div>"
+        )
+        count_line = "not connected"
+    else:
+        orders = zoho.pending_shipments()
+        if orders is None:
+            inner = "<div class='titem'>Could not reach Zoho Books right now — try refreshing in a minute.</div>"
+            count_line = "error"
+        elif not orders:
+            inner = "<div class='titem'>Nothing waiting to ship. 🎉</div>"
+            count_line = "0 to ship"
+        else:
+            # ready+paid first, then ready, then the rest, newest first
+            orders.sort(key=lambda x: (not (x["ready_to_ship"] and x["paid"]), not x["ready_to_ship"], x["created_time"]), reverse=False)
+            cards = []
+            for s in orders:
+                flags = []
+                flags.append("<span class='badge' style='color:#08974b;background:#e5f9dc'>PAID</span>" if s["paid"]
+                             else "<span class='badge' style='color:#c0392b;background:#fdeaea'>UNPAID</span>")
+                if s["ready_to_ship"]:
+                    flags.append("<span class='badge' style='color:#fff;background:#08974b'>READY TO SHIP</span>")
+                if s["ship_on_payment"]:
+                    flags.append("<span class='badge' style='color:#20344c;background:#dce8f9'>SHIP ON PAYMENT</span>")
+                rma = (f" &nbsp;·&nbsp; <a href='{fd_url}/{s['rma_ticket']}' target='_blank'>RMA ticket #{s['rma_ticket']}</a>"
+                       if s["rma_ticket"] else "")
+                goods = f"<br><b>Also in order:</b> {html.escape(', '.join(s['other_goods']))}" if s["other_goods"] else ""
+                box_note = f" ({settings.shipping_box_dims})" if settings.shipping_box_dims else ""
+                prep = (
+                    f"<b>{s['players']} player{'s' if s['players'] != 1 else ''}</b> "
+                    f"&rarr; <b>{s['boxes']} shipping box{'es' if s['boxes'] != 1 else ''}</b>{box_note} "
+                    f"&nbsp;·&nbsp; est. <b>{s['weight_lb']} lb</b> "
+                    f"<span style='color:#75808e'>(player boxes {settings.player_box_dims}, "
+                    f"{settings.player_weight_lb} lb each, max {settings.players_per_shipping_box}/box)</span>"
+                ) if s["players"] else "<span style='color:#75808e'>No player items — check order contents.</span>"
+                cards.append(
+                    f"<div class='titem'>"
+                    f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
+                    f"<a href='{zoho_url}/{s['salesorder_id']}' target='_blank'><b>{html.escape(s['number'] or '')}</b></a>"
+                    f"<span>{html.escape(s['customer'] or '')}</span>{''.join(flags)}"
+                    f"<span style='color:#75808e;font-size:12px;margin-left:auto'>{html.escape(s['date'] or '')}</span></div>"
+                    f"<div style='margin-top:8px'>{prep}{goods}</div>"
+                    f"<div style='margin-top:8px'><b>Ship to:</b> {html.escape(s['address'] or '(no address on order)')}"
+                    f"{rma}</div>"
+                    f"</div>"
+                )
+            inner = "".join(cards)
+            count_line = f"{len(orders)} awaiting shipment"
+
+    body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="300">
+<title>Shipping queue — truDigital AI Support Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+ body {{ font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
+ header {{ background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; flex-wrap:wrap; }}
+ header img {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; }}
+ .wrap {{ max-width:1000px; margin:22px auto; padding:0 16px; }}
+ .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
+ a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
+ .badge {{ padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }}
+ .meta {{ color:#75808e; font-size:12.5px; margin:14px 2px; }}
+</style></head><body>
+<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Shipping queue</h1>
+<span style="color:#75808e;font-size:12.5px">{count_line} · from Zoho Books sales orders · refreshes every 5 min</span></header>
+<div class="wrap">
+ <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
+ <a href="{zoho_url}" target="_blank">Open sales orders in Zoho Books</a></div>
+ {inner}
+</div></body></html>"""
     return HTMLResponse(body)
 
 

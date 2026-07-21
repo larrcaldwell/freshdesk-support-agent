@@ -55,6 +55,18 @@ class Settings:
     # Optional JSON mapping of category -> Freshdesk group_id, e.g. '{"billing-question": 123}'
     group_routing_json: str = os.getenv("GROUP_ROUTING_JSON", "{}")
 
+    # Zoho Books (shipping queue). All four must be set to enable.
+    zoho_client_id: str = os.getenv("ZOHO_CLIENT_ID", "")
+    zoho_client_secret: str = os.getenv("ZOHO_CLIENT_SECRET", "")
+    zoho_refresh_token: str = os.getenv("ZOHO_REFRESH_TOKEN", "")
+    zoho_org_id: str = os.getenv("ZOHO_ORG_ID", "49993287")
+
+    # Shipping box rules
+    players_per_shipping_box: int = int(os.getenv("PLAYERS_PER_SHIPPING_BOX", "10"))
+    player_weight_lb: float = float(os.getenv("PLAYER_WEIGHT_LB", "0.5"))
+    player_box_dims: str = os.getenv("PLAYER_BOX_DIMS", "7.6 x 6 x 2 in")
+    shipping_box_dims: str = os.getenv("SHIPPING_BOX_DIMS", "")  # outer box, optional
+
     # Company context injected into every prompt
     company_name: str = os.getenv("COMPANY_NAME", "our company")
     agent_signature: str = os.getenv("AGENT_SIGNATURE", "Support Team")

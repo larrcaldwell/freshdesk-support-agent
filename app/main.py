@@ -158,6 +158,39 @@ def export_zip(request: Request) -> Response:
     )
 
 
+@app.get("/zoho/exchange")
+def zoho_exchange(request: Request, code: str = "") -> PlainTextResponse:
+    """One-time setup helper: exchanges a Zoho self-client grant code for a
+    refresh token, using the ZOHO_CLIENT_ID/SECRET already in the environment.
+    The refresh token is shown once so it can be pasted into Render env."""
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+    if not settings.zoho_client_id or not settings.zoho_client_secret:
+        return PlainTextResponse("Set ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET in Render env first, then retry.")
+    if not code:
+        return PlainTextResponse("Add ?code=YOUR_GRANT_CODE (from Zoho API console > Self Client > Generate Code).")
+    import httpx as _httpx
+
+    r = _httpx.post(
+        "https://accounts.zoho.com/oauth/v2/token",
+        data={
+            "code": code,
+            "client_id": settings.zoho_client_id,
+            "client_secret": settings.zoho_client_secret,
+            "grant_type": "authorization_code",
+        },
+        timeout=30,
+    )
+    data = r.json()
+    if "refresh_token" in data:
+        return PlainTextResponse(
+            "SUCCESS. Copy this value into Render env as ZOHO_REFRESH_TOKEN, then Save:\n\n"
+            + data["refresh_token"]
+        )
+    return PlainTextResponse(f"Exchange failed: {data}")
+
+
 @app.post("/feedback")
 async def feedback(
     request: Request,
