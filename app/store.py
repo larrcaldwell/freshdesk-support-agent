@@ -155,22 +155,77 @@ def init_shipments() -> None:
                 service TEXT,
                 charge TEXT,
                 trackings TEXT,        -- comma-separated tracking numbers
-                labels TEXT            -- JSON list of base64 GIF labels
+                labels TEXT,           -- JSON list of base64 GIF labels
+                players INTEGER,       -- players in this shipment
+                address TEXT           -- ship-to used for this label
+            )"""
+        )
+        for col, typ in (("players", "INTEGER"), ("address", "TEXT")):
+            try:
+                c.execute(f"ALTER TABLE shipments ADD COLUMN {col} {typ}")
+            except sqlite3.OperationalError:
+                pass
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS ship_status (
+                so_id TEXT PRIMARY KEY,
+                status TEXT,           -- completed | dismissed
+                ts REAL
             )"""
         )
 
 
-def record_shipment(so_id: str, so_number: str, customer: str, service: str, charge: str, trackings: list, labels: list) -> int:
+def record_shipment(so_id: str, so_number: str, customer: str, service: str, charge: str,
+                    trackings: list, labels: list, players: int = 0, address: str = "") -> int:
     import json as _json
 
     init_shipments()
     with _conn() as c:
         cur = c.execute(
-            "INSERT INTO shipments (ts, so_id, so_number, customer, service, charge, trackings, labels)"
-            " VALUES (?,?,?,?,?,?,?,?)",
-            (time.time(), str(so_id), so_number, customer, service, charge, ",".join(trackings), _json.dumps(labels)),
+            "INSERT INTO shipments (ts, so_id, so_number, customer, service, charge, trackings, labels, players, address)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (time.time(), str(so_id), so_number, customer, service, charge, ",".join(trackings),
+             _json.dumps(labels), players, address[:300]),
         )
         return cur.lastrowid
+
+
+def players_shipped(so_id: str) -> int:
+    init_shipments()
+    with _conn() as c:
+        row = c.execute(
+            "SELECT COALESCE(SUM(players), 0) n FROM shipments WHERE so_id = ?", (str(so_id),)
+        ).fetchone()
+    return int(row["n"] or 0)
+
+
+def shipments_for_so(so_id: str) -> list[dict]:
+    init_shipments()
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT id, ts, service, charge, trackings, players, address FROM shipments"
+            " WHERE so_id = ? ORDER BY id DESC", (str(so_id),)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_ship_status(so_id: str, status: str | None) -> None:
+    init_shipments()
+    with _conn() as c:
+        if status:
+            c.execute(
+                "INSERT INTO ship_status (so_id, status, ts) VALUES (?,?,?)"
+                " ON CONFLICT(so_id) DO UPDATE SET status=excluded.status, ts=excluded.ts",
+                (str(so_id), status, time.time()),
+            )
+        else:
+            c.execute("DELETE FROM ship_status WHERE so_id = ?", (str(so_id),))
+
+
+def ship_statuses() -> dict[str, str]:
+    init_shipments()
+    with _conn() as c:
+        rows = c.execute("SELECT so_id, status FROM ship_status").fetchall()
+    return {r["so_id"]: r["status"] for r in rows}
 
 
 def get_shipment(shipment_id: int) -> dict | None:

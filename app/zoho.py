@@ -139,6 +139,28 @@ def pack_players(n: int) -> list[dict]:
     return out
 
 
+def plan_lines(packing: list[dict]) -> list[str]:
+    return [
+        f"{b['dims']} — {b['players']} player{'s' if b['players'] != 1 else ''} ({b['weight']} lb)"
+        for b in packing
+    ]
+
+
+def repack(prep: dict, qty: int) -> dict:
+    """Copy of the prep sheet re-packed for a partial shipment of `qty` players
+    (multi-address orders: ship some players now, the rest stay in the queue)."""
+    total = prep.get("players") or 0
+    qty = max(1, min(int(qty), total)) if total else 0
+    out = dict(prep)
+    packing = pack_players(qty)
+    out["players"] = qty
+    out["packing"] = packing
+    out["boxes"] = len(packing)
+    out["pack_plan"] = plan_lines(packing)
+    out["weight_lb"] = round(qty * settings.player_weight_lb, 1)
+    return out
+
+
 def get_prep(salesorder_id: str) -> dict | None:
     """Fetch one sales order fresh and return its prep sheet."""
     if not enabled():

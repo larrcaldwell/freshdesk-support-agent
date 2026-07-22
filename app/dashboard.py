@@ -212,7 +212,15 @@ def dashboard(request: Request) -> HTMLResponse:
 
     if zoho.enabled():
         ship_orders = zoho.pending_shipments()
-        ship_count = len(ship_orders) if ship_orders is not None else "–"
+        if ship_orders is None:
+            ship_count = "–"
+        else:
+            statuses = store.ship_statuses()
+            ship_count = sum(
+                1 for s in ship_orders
+                if not statuses.get(str(s["salesorder_id"]))
+                and not (s["players"] and store.players_shipped(s["salesorder_id"]) >= s["players"])
+            )
     else:
         ship_count = "–"
 
@@ -445,6 +453,7 @@ def shipping(request: Request) -> HTMLResponse:
     fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
     zoho_url = "https://books.zoho.com/app/49993287#/salesorders"
 
+    tab = request.query_params.get("t", "queue")
     if not zoho.enabled():
         inner = (
             "<div class='titem'><b>Zoho isn't connected yet.</b><br>"
@@ -453,19 +462,34 @@ def shipping(request: Request) -> HTMLResponse:
             "its box count, weight, and address ready for UPS.</div>"
         )
         count_line = "not connected"
+        tabs = ""
     else:
         orders = zoho.pending_shipments()
+        tabs = ""
         if orders is None:
             inner = "<div class='titem'>Could not reach Zoho Books right now — try refreshing in a minute.</div>"
             count_line = "error"
-        elif not orders:
-            inner = "<div class='titem'>Nothing waiting to ship. 🎉</div>"
-            count_line = "0 to ship"
         else:
-            # ready+paid first, then ready, then the rest, newest first
-            orders.sort(key=lambda x: (not (x["ready_to_ship"] and x["paid"]), not x["ready_to_ship"], x["created_time"]), reverse=False)
-            cards = []
+            statuses = store.ship_statuses()
+            active, done = [], []
             for s in orders:
+                s["shipped_players"] = store.players_shipped(s["salesorder_id"])
+                s["remaining"] = max((s["players"] or 0) - s["shipped_players"], 0)
+                s["manual_status"] = statuses.get(str(s["salesorder_id"]), "")
+                fully_shipped = s["players"] and s["remaining"] == 0
+                if s["manual_status"] or fully_shipped:
+                    done.append(s)
+                else:
+                    active.append(s)
+            active.sort(key=lambda x: (not (x["ready_to_ship"] and x["paid"]), not x["ready_to_ship"], x["created_time"]))
+            show = done if tab == "done" else active
+            tabs = (
+                f"<div style='margin-bottom:14px'>"
+                f"<a class='pill{' on' if tab != 'done' else ''}' href='/shipping'>To ship ({len(active)})</a> "
+                f"<a class='pill{' on' if tab == 'done' else ''}' href='/shipping?t=done'>Completed ({len(done)})</a></div>"
+            )
+            cards = []
+            for s in show:
                 flags = []
                 flags.append("<span class='badge' style='color:#08974b;background:#e5f9dc'>PAID</span>" if s["paid"]
                              else "<span class='badge' style='color:#c0392b;background:#fdeaea'>UNPAID</span>")
@@ -473,31 +497,64 @@ def shipping(request: Request) -> HTMLResponse:
                     flags.append("<span class='badge' style='color:#fff;background:#08974b'>READY TO SHIP</span>")
                 if s["ship_on_payment"]:
                     flags.append("<span class='badge' style='color:#20344c;background:#dce8f9'>SHIP ON PAYMENT</span>")
+                if s["manual_status"] == "completed":
+                    flags.append("<span class='badge' style='color:#fff;background:#20344c'>MARKED COMPLETE</span>")
+                elif s["manual_status"] == "dismissed":
+                    flags.append("<span class='badge' style='color:#75808e;background:#ebeef2'>DISMISSED</span>")
+                elif s["players"] and s["remaining"] == 0:
+                    flags.append("<span class='badge' style='color:#fff;background:#08974b'>ALL SHIPPED</span>")
                 rma = (f" &nbsp;·&nbsp; <a href='{fd_url}/{s['rma_ticket']}' target='_blank'>RMA ticket #{s['rma_ticket']}</a>"
                        if s["rma_ticket"] else "")
                 goods = f"<br><b>Also in order:</b> {html.escape(', '.join(s['other_goods']))}" if s["other_goods"] else ""
-                plan_lines = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in s.get("pack_plan") or [])
+                plan_html = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in s.get("pack_plan") or [])
+                progress = (
+                    f" <span style='color:#08974b;font-weight:600'>({s['shipped_players']} of {s['players']} shipped, {s['remaining']} left)</span>"
+                    if s["shipped_players"] and s["remaining"] else ""
+                )
                 prep = (
-                    f"<b>{s['players']} player{'s' if s['players'] != 1 else ''}</b> "
+                    f"<b>{s['players']} player{'s' if s['players'] != 1 else ''}</b>{progress} "
                     f"&rarr; <b>{s['boxes']} shipping box{'es' if s['boxes'] != 1 else ''}</b> "
                     f"&nbsp;·&nbsp; est. <b>{s['weight_lb']} lb</b> total"
-                    f"<div style='margin-top:4px;color:#20344c'>{plan_lines}</div>"
+                    f"<div style='margin-top:4px;color:#20344c'>{plan_html}</div>"
                 ) if s["players"] else "<span style='color:#75808e'>No player items — check order contents.</span>"
-                shipped = store.shipment_for_so(s["salesorder_id"])
-                if shipped:
-                    action_html = (
-                        f"<div style='margin-top:8px'>&#9989; <b>Label created</b> — {html.escape(shipped['service'] or '')} · "
-                        f"tracking {html.escape(shipped['trackings'] or '')} · "
-                        f"<a href='/shipping/label/{shipped['id']}'>View / print label</a></div>"
+
+                # Past labels for this order
+                past = store.shipments_for_so(s["salesorder_id"])
+                past_html = "".join(
+                    f"<div style='margin-top:6px'>&#9989; {html.escape(p['service'] or '')}"
+                    + (f" — {p['players']} player{'s' if p['players'] != 1 else ''}" if p.get("players") else "")
+                    + f" · tracking {html.escape(p['trackings'] or '')}"
+                    + (f" · <span style='color:#75808e'>{html.escape((p.get('address') or '')[:60])}</span>" if p.get("address") else "")
+                    + f" · <a href='/shipping/label/{p['id']}'>label</a></div>"
+                    for p in past
+                )
+
+                buttons = []
+                if tab != "done":
+                    if s["remaining"] and ups_ok:
+                        label_txt = "Get UPS rates &amp; create label" if not s["shipped_players"] else f"Ship remaining {s['remaining']}"
+                        buttons.append(
+                            f"<a href='/shipping/rates?so={s['salesorder_id']}' "
+                            f"style='background:#08974b;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px'>{label_txt} &rarr;</a>"
+                        )
+                    buttons.append(
+                        f"<form method='post' action='/shipping/status' style='display:inline'>"
+                        f"<input type='hidden' name='so' value='{s['salesorder_id']}'><input type='hidden' name='action' value='complete'>"
+                        f"<button type='submit' style='background:#20344c;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-family:inherit;cursor:pointer'>&#10003; Mark complete</button></form>"
                     )
-                elif s["players"] and ups_ok:
-                    action_html = (
-                        f"<div style='margin-top:10px'><a href='/shipping/rates?so={s['salesorder_id']}' "
-                        f"style='background:#08974b;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px'>"
-                        f"Get UPS rates &amp; create label &rarr;</a></div>"
+                    buttons.append(
+                        f"<form method='post' action='/shipping/status' style='display:inline'>"
+                        f"<input type='hidden' name='so' value='{s['salesorder_id']}'><input type='hidden' name='action' value='dismiss'>"
+                        f"<button type='submit' style='background:#fff;color:#75808e;border:1px solid #cfd8d4;border-radius:8px;padding:8px 14px;font-size:13px;font-family:inherit;cursor:pointer'>&#10005; Dismiss</button></form>"
                     )
-                else:
-                    action_html = ""
+                elif s["manual_status"]:
+                    buttons.append(
+                        f"<form method='post' action='/shipping/status' style='display:inline'>"
+                        f"<input type='hidden' name='so' value='{s['salesorder_id']}'><input type='hidden' name='action' value='restore'>"
+                        f"<button type='submit' style='background:#fff;color:#08974b;border:1px solid #08974b;border-radius:8px;padding:8px 14px;font-size:13px;font-family:inherit;cursor:pointer'>&#8617; Restore to queue</button></form>"
+                    )
+                action_html = f"<div style='margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center'>{''.join(buttons)}</div>" if buttons else ""
+
                 cards.append(
                     f"<div class='titem'>"
                     f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
@@ -507,11 +564,15 @@ def shipping(request: Request) -> HTMLResponse:
                     f"<div style='margin-top:8px'>{prep}{goods}</div>"
                     f"<div style='margin-top:8px'><b>Ship to:</b> {html.escape(s['address'] or '(no address on order)')}"
                     f"{rma}</div>"
+                    f"{past_html}"
                     f"{action_html}"
                     f"</div>"
                 )
-            inner = "".join(cards)
-            count_line = f"{len(orders)} awaiting shipment"
+            inner = "".join(cards) or (
+                "<div class='titem'>Nothing completed yet.</div>" if tab == "done"
+                else "<div class='titem'>Nothing waiting to ship. &#127881;</div>"
+            )
+            count_line = f"{len(active)} to ship · {len(done)} completed"
 
     body = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -527,12 +588,16 @@ def shipping(request: Request) -> HTMLResponse:
  a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
  .badge {{ padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }}
  .meta {{ color:#75808e; font-size:12.5px; margin:14px 2px; }}
+ .pill {{ background:#fff; border-radius:20px; padding:7px 16px; font-size:13px; font-weight:600; color:#20344c; text-decoration:none; box-shadow:0 1px 3px rgba(32,52,76,.10); }}
+ .pill.on {{ background:#08974b; color:#fff; }}
+ .pill:hover {{ background:#5cdd31; color:#20344c; text-decoration:none; }}
 </style></head><body>
 <header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Shipping queue</h1>
 <span style="color:#75808e;font-size:12.5px">{count_line} · from Zoho Books sales orders · refreshes every 5 min</span></header>
 <div class="wrap">
  <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
  <a href="{zoho_url}" target="_blank">Open sales orders in Zoho Books</a></div>
+ {tabs}
  {inner}
 </div></body></html>"""
     return HTMLResponse(body)
@@ -610,9 +675,25 @@ def _addr_form_fields(prep: dict, hidden: bool) -> str:
     return "".join(rows)
 
 
+@router.post("/shipping/status")
+async def shipping_status(request: Request):
+    denied = _ship_auth(request)
+    if denied:
+        return denied
+    from fastapi.responses import RedirectResponse
+
+    form = await request.form()
+    so = str(form.get("so") or "")
+    action = str(form.get("action") or "")
+    if so and action in ("complete", "dismiss", "restore"):
+        store.set_ship_status(so, {"complete": "completed", "dismiss": "dismissed", "restore": None}[action])
+    return RedirectResponse(url="/shipping" + ("?t=done" if action in ("complete", "dismiss") else ""), status_code=303)
+
+
 @router.get("/shipping/rates", response_class=HTMLResponse)
 def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
-    """Live UPS prices for one order; rep can fix the address and pick a service."""
+    """Live UPS prices for one order; rep can fix the address, split the
+    shipment (multi-address orders), and pick a service."""
     denied = _ship_auth(request)
     if denied:
         return denied
@@ -621,14 +702,36 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
     prep = zoho.get_prep(so) if so else None
     if not prep:
         return HTMLResponse("<h3 style='font-family:sans-serif'>Order not found in Zoho.</h3>", status_code=404)
+    total_players = prep.get("players") or 0
+    remaining = max(total_players - store.players_shipped(so), 0)
+    try:
+        qty = int(request.query_params.get("qty") or remaining or total_players)
+    except ValueError:
+        qty = remaining or total_players
+    qty = max(1, min(qty, remaining or total_players)) if total_players else 0
+    if qty and qty != total_players:
+        prep = zoho.repack(prep, qty)
+    elif qty:
+        prep = zoho.repack(prep, qty)  # normalizes even for full quantity
     _addr_overrides(prep, request.query_params)
     rates, err = ups.shop_rates(prep)
 
     plan = "".join(f"<div>&#128230; {html.escape(p)}</div>" for p in prep.get("pack_plan") or [])
+    split_note = ""
+    if remaining and remaining < total_players:
+        split_note = f"<span style='color:#08974b;font-weight:600'> — {total_players - remaining} already shipped, {remaining} left</span>"
+    qty_field = (
+        f"<label style='font-size:12px;color:#75808e;display:inline-block;margin:4px 8px 0 0'>Players in THIS shipment{split_note}<br>"
+        f"<input type='number' name='qty' min='1' max='{remaining or total_players}' value='{qty}' "
+        f"style='border:1px solid #cfd8d4;border-radius:8px;padding:7px 9px;font-family:inherit;font-size:13.5px;width:80px;color:#20344c'></label>"
+        f"<div style='color:#75808e;font-size:11.5px;margin-top:2px'>Shipping to more than one address? Enter how many players go to the address below, "
+        f"create that label, and the order stays in the queue for the rest.</div>"
+    ) if total_players else ""
     addr_editor = (
-        f"<div class='titem'><b>Ship-to address</b> <span style='color:#75808e;font-size:12px'>— edit anything UPS complains about, then Update rates. (This changes the label only, not Zoho.)</span>"
+        f"<div class='titem'><b>Ship-to address &amp; quantity</b> <span style='color:#75808e;font-size:12px'>— edit anything, then Update rates. (This changes the label only, not Zoho.)</span>"
         f"<form method='get' action='/shipping/rates' style='margin-top:6px'>"
         f"<input type='hidden' name='so' value='{html.escape(so, quote=True)}'>"
+        f"{qty_field}<br>"
         f"{_addr_form_fields(prep, hidden=False)}"
         f"<div><button class='go' type='submit' style='padding:9px 18px;font-size:13.5px;margin-top:10px'>Update rates</button></div>"
         f"</form></div>"
@@ -666,6 +769,7 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
  {addr_editor}
  <form method="post" action="/shipping/label">
   <input type="hidden" name="so" value="{html.escape(so, quote=True)}">
+  <input type="hidden" name="qty" value="{qty}">
   {_addr_form_fields(prep, hidden=True)}
   {options}
   {button}
@@ -689,6 +793,14 @@ async def shipping_label_create(request: Request) -> HTMLResponse:
     prep = zoho.get_prep(so) if so else None
     if not prep or not service:
         return HTMLResponse("<h3 style='font-family:sans-serif'>Missing order or service.</h3>", status_code=400)
+    total_players = prep.get("players") or 0
+    try:
+        qty = int(form.get("qty") or total_players)
+    except ValueError:
+        qty = total_players
+    qty = max(1, min(qty, total_players)) if total_players else 0
+    if qty:
+        prep = zoho.repack(prep, qty)
     _addr_overrides(prep, form)
     result, err = ups.create_label(prep, service)
     if not result or not result.get("labels"):
@@ -704,6 +816,7 @@ async def shipping_label_create(request: Request) -> HTMLResponse:
         so, prep.get("number") or "", prep.get("customer") or "",
         f"UPS {result['service']}", result.get("charge") or "",
         result.get("trackings") or [], result.get("labels") or [],
+        players=qty, address=prep.get("address") or "",
     )
     # Best-effort: post tracking to the linked RMA ticket
     if prep.get("rma_ticket"):
