@@ -161,9 +161,11 @@ def process_ticket(ticket_id: int) -> None:
         action = "triage-only"
         log.info("Ticket #%s: triage only", ticket_id)
 
+    requester = ticket.get("requester") or {}
     store.record(
         ticket_id,
         subject=ticket.get("subject") or "",
+        customer=requester.get("name") or requester.get("email") or "",
         category=verdict.get("category") or "",
         priority=verdict.get("priority") or "",
         sentiment=verdict.get("sentiment") or "",

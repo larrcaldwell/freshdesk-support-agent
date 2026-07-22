@@ -33,7 +33,7 @@ def _fresh_new_tickets(hours: int = 24) -> list | None:
         try:
             from .freshdesk import fd
 
-            tickets = fd._request("GET", "/tickets?per_page=100&order_by=created_at&order_type=desc") or []
+            tickets = fd._request("GET", "/tickets?per_page=100&order_by=created_at&order_type=desc&include=requester") or []
             _new_tickets_cache = (now, tickets)
         except Exception:
             log.exception("Could not fetch new tickets from Freshdesk")
@@ -132,6 +132,7 @@ def _event_row(e: dict, fd_url: str, teach: bool = True) -> str:
     return (
         f"<tr><td data-ts='{e['ts']}'>{_fmt_time(e['ts'])}</td>"
         f"<td>{link}</td>"
+        f"<td>{html.escape(e.get('customer') or '–')}</td>"
         f"<td>{ch_label}</td>"
         f"<td class='subj'>{html.escape(e['subject'] or '')}</td>"
         f"<td>{html.escape(e['category'] or '–')}</td>"
@@ -144,7 +145,7 @@ def _event_row(e: dict, fd_url: str, teach: bool = True) -> str:
 
 
 EVENT_HEADERS = (
-    "<tr><th>When</th><th>Ticket / Chat</th><th>Channel</th><th>Subject</th>"
+    "<tr><th>When</th><th>Ticket / Chat</th><th>Customer</th><th>Channel</th><th>Subject</th>"
     "<th>Category</th><th>Sentiment</th><th>Confidence</th><th>Needs human</th><th>Result</th></tr>"
 )
 
@@ -203,7 +204,7 @@ def dashboard(request: Request) -> HTMLResponse:
     fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
 
     rows = [_event_row(e, fd_url) for e in events]
-    table = "".join(rows) or "<tr><td colspan='9' class='empty'>No activity yet. New tickets will appear here automatically.</td></tr>"
+    table = "".join(rows) or "<tr><td colspan='10' class='empty'>No activity yet. New tickets will appear here automatically.</td></tr>"
 
     new_tickets = _fresh_new_tickets(24)
     new_count = len(new_tickets) if new_tickets is not None else "–"
@@ -345,21 +346,23 @@ def activity(request: Request) -> HTMLResponse:
         tickets = _fresh_new_tickets(RANGES[r][1] or 24 * 365) or []
         if q:
             tickets = [t for t in tickets if q in (t.get("subject") or "").lower()]
-        headers = "<tr><th>Created</th><th>Ticket</th><th>Subject</th><th>Status</th><th>Priority</th></tr>"
+        headers = "<tr><th>Created</th><th>Ticket</th><th>Customer</th><th>Subject</th><th>Status</th><th>Priority</th></tr>"
         rows = []
         for t in tickets:
             try:
                 ts = datetime.fromisoformat(str(t.get("created_at", "")).replace("Z", "+00:00")).timestamp()
             except Exception:
                 ts = 0
+            req = t.get("requester") or {}
             rows.append(
                 f"<tr><td data-ts='{ts}'>{_fmt_time(ts)}</td>"
                 f"<td><a href='{fd_url}/{t.get('id')}' target='_blank'>#{t.get('id')}</a></td>"
+                f"<td>{html.escape(req.get('name') or req.get('email') or '–')}</td>"
                 f"<td class='subj'>{html.escape(t.get('subject') or '')}</td>"
                 f"<td>{FD_STATUS.get(t.get('status'), t.get('status'))}</td>"
                 f"<td>{FD_PRIORITY.get(t.get('priority'), t.get('priority'))}</td></tr>"
             )
-        table = "".join(rows) or "<tr><td colspan='5' class='empty'>No new tickets in this window (or Freshdesk unreachable).</td></tr>"
+        table = "".join(rows) or "<tr><td colspan='6' class='empty'>No new tickets in this window (or Freshdesk unreachable).</td></tr>"
         count = len(tickets)
     else:
         events = store.events_since(RANGES[r][1])
@@ -370,11 +373,13 @@ def activity(request: Request) -> HTMLResponse:
         if q:
             events = [
                 e for e in events
-                if q in (e.get("subject") or "").lower() or q in (e.get("category") or "").lower()
+                if q in (e.get("subject") or "").lower()
+                or q in (e.get("category") or "").lower()
+                or q in (e.get("customer") or "").lower()
             ]
         headers = EVENT_HEADERS
         rows = [_event_row(e, fd_url) for e in events]
-        table = "".join(rows) or "<tr><td colspan='9' class='empty'>Nothing matches this filter.</td></tr>"
+        table = "".join(rows) or "<tr><td colspan='10' class='empty'>Nothing matches this filter.</td></tr>"
         count = len(rows)
 
     def pill(key: str, label: str, current: str, param: str) -> str:
@@ -425,7 +430,7 @@ def activity(request: Request) -> HTMLResponse:
  <div class="bar">{range_pills}
   <form class="search" method="get" action="/activity">
    <input type="hidden" name="f" value="{f}"><input type="hidden" name="r" value="{r}">
-   <input type="text" name="q" value="{html.escape(q, quote=True)}" placeholder="Search subject or category…">
+   <input type="text" name="q" value="{html.escape(q, quote=True)}" placeholder="Search customer, subject, category…">
   </form>
  </div>
  <table class="sortable">
@@ -559,7 +564,7 @@ def shipping(request: Request) -> HTMLResponse:
                     f"<div class='titem'>"
                     f"<div style='display:flex;gap:10px;align-items:center;flex-wrap:wrap'>"
                     f"<a href='{zoho_url}/{s['salesorder_id']}' target='_blank'><b>{html.escape(s['number'] or '')}</b></a>"
-                    f"<span>{html.escape(s['customer'] or '')}</span>{''.join(flags)}"
+                    f"<span style='font-weight:600'>{html.escape(s['customer'] or '')}</span>{''.join(flags)}"
                     f"<span style='color:#75808e;font-size:12px;margin-left:auto'>{html.escape(s['date'] or '')}</span></div>"
                     f"<div style='margin-top:8px'>{prep}{goods}</div>"
                     f"<div style='margin-top:8px'><b>Ship to:</b> {html.escape(s['address'] or '(no address on order)')}"

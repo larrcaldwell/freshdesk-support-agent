@@ -40,14 +40,16 @@ def init() -> None:
                 action TEXT,          -- auto-replied | draft-posted | triage-only | error
                 detail TEXT,
                 ref TEXT,             -- stable key (e.g. chat conversation id) for upserts
-                channel TEXT          -- email | portal | phone | chat | live-chat | ...
+                channel TEXT,         -- email | portal | phone | chat | live-chat | ...
+                customer TEXT         -- requester / chat user name
             )"""
         )
-        # Migration for databases created before the channel column existed.
-        try:
-            c.execute("ALTER TABLE events ADD COLUMN channel TEXT")
-        except sqlite3.OperationalError:
-            pass
+        # Migrations for databases created before these columns existed.
+        for col in ("channel", "customer"):
+            try:
+                c.execute(f"ALTER TABLE events ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError:
+                pass
 
 
 def record(
@@ -62,6 +64,7 @@ def record(
     detail: str = "",
     ref: str = "",
     channel: str = "",
+    customer: str = "",
 ) -> None:
     init()
     with _conn() as c:
@@ -69,7 +72,7 @@ def record(
             c.execute("DELETE FROM events WHERE ref = ?", (ref,))
         c.execute(
             "INSERT INTO events (ts, ticket_id, subject, category, priority, sentiment,"
-            " confidence, needs_human, action, detail, ref, channel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " confidence, needs_human, action, detail, ref, channel, customer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 time.time(),
                 ticket_id,
@@ -83,6 +86,7 @@ def record(
                 detail[:500],
                 ref,
                 channel,
+                customer[:120],
             ),
         )
 

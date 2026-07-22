@@ -67,8 +67,20 @@ def _default_agent() -> str | None:
     return _default_agent_id
 
 
-def _transcript(conversation_id: str) -> tuple[str, str | None, bool]:
-    """Returns (transcript_text, assigned_agent_id, is_resolved)."""
+def _user_name(user_id: str) -> str:
+    """Best-effort customer name for a Freshchat user."""
+    if not user_id:
+        return ""
+    try:
+        u = _get(f"/users/{user_id}")
+        name = f"{u.get('first_name') or ''} {u.get('last_name') or ''}".strip()
+        return name or u.get("email") or ""
+    except Exception:
+        return ""
+
+
+def _transcript(conversation_id: str) -> tuple[str, str | None, bool, str]:
+    """Returns (transcript_text, assigned_agent_id, is_resolved, customer_name)."""
     convo = _get(f"/conversations/{conversation_id}")
     resolved = convo.get("status") == "resolved"
     agent_id = convo.get("assigned_agent_id") or None
@@ -78,9 +90,12 @@ def _transcript(conversation_id: str) -> tuple[str, str | None, bool]:
     msgs.sort(key=lambda m: m.get("created_time", ""))
 
     lines = []
+    user_id = ""
     for m in msgs:
         if m.get("message_type") == "private":
             continue  # skip our own notes and agent whispers
+        if m.get("actor_type") == "user" and not user_id:
+            user_id = m.get("actor_id") or ""
         who = {"user": "CUSTOMER", "agent": "AGENT", "bot": "BOT", "system": "SYSTEM"}.get(
             m.get("actor_type"), "?"
         )
@@ -88,7 +103,7 @@ def _transcript(conversation_id: str) -> tuple[str, str | None, bool]:
             text = (part.get("text") or {}).get("content")
             if text:
                 lines.append(f"{who}: {text}")
-    return "\n".join(lines), agent_id, resolved
+    return "\n".join(lines), agent_id, resolved, _user_name(user_id)
 
 
 def post_private_note(conversation_id: str, text: str, agent_id: str | None) -> None:
@@ -122,7 +137,7 @@ def process_chat_message(conversation_id: str) -> None:
         log.info("Chat %s: superseded by newer message; skipping", conversation_id)
         return
 
-    transcript, agent_id, resolved = _transcript(conversation_id)
+    transcript, agent_id, resolved, customer = _transcript(conversation_id)
     if resolved or not transcript.strip():
         return
     last_line = transcript.rstrip().splitlines()[-1]
@@ -164,5 +179,6 @@ def process_chat_message(conversation_id: str) -> None:
         action="chat-copilot",
         ref=conversation_id,
         channel="live-chat",
+        customer=customer,
     )
     log.info("Chat %s: suggestion posted", conversation_id)
