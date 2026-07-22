@@ -180,6 +180,121 @@ document.querySelectorAll('table.sortable th').forEach(function(th, idx){
 </script>"""
 
 
+NAV = [
+    ("overview", "Overview", "/dashboard", "&#9632;"),
+    ("activity", "Activity", "/activity", "&#9202;"),
+    ("shipping", "Shipping", "/shipping", "&#128230;"),
+    ("teachings", "Teachings", "/teachings", "&#127891;"),
+]
+
+SHELL_CSS = """
+ * { box-sizing:border-box; }
+ body { font-family:'Poppins',-apple-system,Segoe UI,Roboto,sans-serif; margin:0; background:#ebeef2; color:#20344c; display:flex; min-height:100vh; }
+ .sidebar { width:212px; background:#20344c; color:#fff; flex-shrink:0; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+ .sidebar .logo { padding:20px 18px 14px; border-bottom:1px solid rgba(255,255,255,.08); }
+ .sidebar .logo img { height:30px; filter:brightness(0) invert(1); }
+ .sidebar nav { padding:12px 10px; flex:1; }
+ .sidebar nav a { display:flex; align-items:center; gap:10px; color:#c6cdd7; text-decoration:none; font-size:13.5px; font-weight:500; padding:10px 12px; border-radius:10px; margin-bottom:2px; }
+ .sidebar nav a:hover { background:rgba(255,255,255,.08); color:#fff; }
+ .sidebar nav a.on { background:#08974b; color:#fff; font-weight:600; }
+ .sidebar nav a .ic { width:18px; text-align:center; }
+ .sidebar .foot { padding:14px 18px; border-top:1px solid rgba(255,255,255,.08); font-size:11.5px; color:#8b96a5; }
+ .sidebar .foot a { color:#5cdd31; text-decoration:none; font-weight:600; }
+ .sidebar .foot a:hover { text-decoration:underline; }
+ .modebadge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:10.5px; font-weight:700; margin-bottom:10px; }
+ .main { flex:1; min-width:0; }
+ .pagehead { background:#fff; padding:16px 30px; border-bottom:4px solid #5cdd31; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+ .pagehead h1 { font-size:18px; margin:0; font-weight:600; }
+ .pagehead .sub { color:#75808e; font-size:12.5px; }
+ .wrap { max-width:1200px; margin:24px auto; padding:0 24px; }
+ .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
+ .card { background:#fff; border-radius:14px; padding:16px 22px; box-shadow:0 1px 3px rgba(32,52,76,.10); min-width:128px; }
+ .num { font-size:26px; font-weight:700; color:#20344c; }
+ .lbl { font-size:12px; color:#75808e; margin-top:2px; }
+ a.cardlink, a.cardlink2 { text-decoration:none; display:block; }
+ a.cardlink { border:1px solid #5cdd31; }
+ a.cardlink:hover, a.cardlink2:hover { background:#f4faf1; text-decoration:none; box-shadow:0 2px 6px rgba(32,52,76,.18); }
+ table { width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 1px 3px rgba(32,52,76,.10); }
+ th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#75808e; padding:10px 12px; border-bottom:2px solid #ebeef2; font-weight:600; user-select:none; }
+ td { padding:10px 12px; border-bottom:1px solid #ebeef2; font-size:13.5px; vertical-align:top; }
+ tr:hover td { background:#f4faf1; }
+ a { color:#08974b; font-weight:600; text-decoration:none; } a:hover { text-decoration:underline; }
+ .badge { padding:3px 9px; border-radius:20px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+ .subj { max-width:340px; }
+ .detail { color:#c0392b; font-size:12px; margin-top:4px; }
+ .empty { text-align:center; color:#75808e; padding:28px; }
+ .meta { color:#75808e; font-size:12.5px; margin:0 2px 14px; }
+ .footnote { color:#75808e; font-size:12px; margin:18px 4px; }
+ .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+ .pill { background:#fff; border-radius:20px; padding:6px 14px; font-size:12.5px; font-weight:600; color:#20344c; text-decoration:none; box-shadow:0 1px 3px rgba(32,52,76,.10); }
+ .pill.on { background:#08974b; color:#fff; }
+ .pill:hover { background:#5cdd31; color:#20344c; text-decoration:none; }
+ .search { margin-left:auto; }
+ .search input { border:1px solid #cfd8d4; border-radius:20px; padding:7px 14px; font-family:inherit; font-size:13px; width:230px; }
+ .titem { background:#fff; border-radius:12px; padding:15px 19px; margin-bottom:11px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }
+ .titem .n { color:#08974b; font-weight:700; margin-right:8px; }
+ details.teach { margin-top:6px; }
+ details.teach summary { cursor:pointer; color:#08974b; font-size:12px; font-weight:600; list-style:none; }
+ details.teach summary:hover { text-decoration:underline; }
+ details.teach form { margin-top:8px; background:#f4faf1; border:1px solid #d7f0c9; border-radius:10px; padding:10px; }
+ details.teach textarea { width:100%; min-height:64px; border:1px solid #cfd8d4; border-radius:8px; padding:8px; font-family:inherit; font-size:13px; }
+ details.teach input[type=text] { border:1px solid #cfd8d4; border-radius:8px; padding:6px 8px; font-family:inherit; font-size:12.5px; margin-top:6px; }
+ details.teach button { background:#08974b; color:#fff; border:none; border-radius:8px; padding:7px 14px; font-weight:600; font-size:12.5px; margin-top:8px; cursor:pointer; }
+ details.teach button:hover { background:#067a3d; }
+ label.rate { display:flex; align-items:center; gap:12px; background:#fff; border:2px solid #ebeef2; border-radius:12px; padding:14px 18px; margin-bottom:10px; cursor:pointer; font-size:14.5px; }
+ label.rate:hover { border-color:#5cdd31; }
+ label.rate input { transform:scale(1.3); }
+ .price { margin-left:auto; font-weight:700; font-size:16px; }
+ button.go { background:#08974b; color:#fff; border:none; border-radius:10px; padding:12px 24px; font-weight:700; font-size:15px; cursor:pointer; font-family:inherit; margin-top:8px; }
+ button.go:hover { background:#067a3d; }
+ @media (max-width:820px) {
+  body { flex-direction:column; }
+  .sidebar { width:100%; height:auto; position:static; flex-direction:row; align-items:center; }
+  .sidebar .logo { border:none; padding:12px 14px; }
+  .sidebar nav { display:flex; padding:8px; flex:1; overflow-x:auto; }
+  .sidebar nav a { margin:0 2px; white-space:nowrap; }
+  .sidebar .foot { display:none; }
+ }
+ @media print { .sidebar, .pagehead, .meta, .noprint { display:none !important; } body { background:#fff; display:block; } .wrap { margin:0; max-width:none; padding:0; } img.label { page-break-after:always; } }
+"""
+
+
+def _shell(title: str, active: str, sub: str, content: str, refresh: int = 0) -> str:
+    """Shared app shell: navy sidebar + page header + content area."""
+    nav = "".join(
+        f"<a class='{'on' if key == active else ''}' href='{href}'><span class='ic'>{icon}</span>{label}</a>"
+        for key, label, href, icon in NAV
+    )
+    mode = (
+        "<span class='modebadge' style='color:#fff;background:#c0392b'>AUTO-REPLY ON</span>"
+        if settings.auto_reply_enabled
+        else "<span class='modebadge' style='color:#20344c;background:#5cdd31'>DRAFT MODE</span>"
+    )
+    meta_refresh = f"<meta http-equiv='refresh' content='{refresh}'>" if refresh else ""
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{meta_refresh}
+<title>{html.escape(title)} — truDigital Support</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>{SHELL_CSS}</style></head>
+<body>
+<aside class="sidebar">
+ <div class="logo"><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"></div>
+ <nav>{nav}</nav>
+ <div class="foot">{mode}<br>
+  <a href="/export.zip">&#11015; Export all data</a><br>
+  <a href="/journal.jsonl">&#11015; Reasoning journal</a><br>
+  <span style="color:#8b96a5">Model: {html.escape(settings.model)}</span>
+ </div>
+</aside>
+<div class="main">
+ <div class="pagehead"><h1>{html.escape(title)}</h1><span class="sub">{sub}</span></div>
+ <div class="wrap">
+{content}
+ </div>
+</div>
+</body></html>"""
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     if not settings.dashboard_key:
@@ -225,63 +340,12 @@ def dashboard(request: Request) -> HTMLResponse:
     else:
         ship_count = "–"
 
-    mode = (
-        "<span class='badge' style='color:#c0392b;background:#fdeaea'>AUTO-REPLY ON</span>"
-        if settings.auto_reply_enabled
-        else "<span class='badge' style='color:#08974b;background:#e5f9dc'>Draft mode — humans send every reply</span>"
-    )
-
     def stat(label: str, value, href: str = "") -> str:
         if href:
             return f"<a class='card cardlink2' href='{href}'><div class='num'>{value}</div><div class='lbl'>{label} &rarr;</div></a>"
         return f"<div class='card'><div class='num'>{value}</div><div class='lbl'>{label}</div></div>"
 
-    LOGO_B64_ = LOGO_B64
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="60">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Support Agent — truDigital</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
- body {{ font-family: 'Poppins', -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
- header {{ background:#ffffff; color:#20344c; padding:14px 28px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; border-bottom:4px solid #5cdd31; }}
- header img.logo {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; color:#20344c; }}
- header .sub {{ color:#75808e; font-size:12.5px; }}
- .wrap {{ max-width:1150px; margin:22px auto; padding:0 16px; }}
- .cards {{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }}
- .card {{ background:#fff; border-radius:14px; padding:16px 22px; box-shadow:0 1px 3px rgba(32,52,76,.10); min-width:130px; }}
- .num {{ font-size:26px; font-weight:700; color:#20344c; }}
- .lbl {{ font-size:12px; color:#75808e; margin-top:2px; }}
- table {{ width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 1px 3px rgba(32,52,76,.10); }}
- th {{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#75808e; padding:10px 12px; border-bottom:2px solid #ebeef2; font-weight:600; }}
- td {{ padding:10px 12px; border-bottom:1px solid #ebeef2; font-size:13.5px; vertical-align:top; }}
- tr:hover td {{ background:#f4faf1; }}
- a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
- .badge {{ padding:3px 9px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }}
- .subj {{ max-width:320px; }}
- .detail {{ color:#c0392b; font-size:12px; margin-top:4px; }}
- .empty {{ text-align:center; color:#75808e; padding:28px; }}
- a.cardlink {{ text-decoration:none; display:block; border:1px solid #5cdd31; }}
- a.cardlink:hover {{ background:#f4faf1; text-decoration:none; }}
- a.cardlink2 {{ text-decoration:none; display:block; }}
- a.cardlink2:hover {{ background:#f4faf1; text-decoration:none; box-shadow:0 2px 6px rgba(32,52,76,.18); }}
- .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
- .titem .n {{ color:#08974b; font-weight:700; margin-right:8px; }}
- details.teach {{ margin-top:6px; }}
- details.teach summary {{ cursor:pointer; color:#08974b; font-size:12px; font-weight:600; list-style:none; }}
- details.teach summary:hover {{ text-decoration:underline; }}
- details.teach form {{ margin-top:8px; background:#f4faf1; border:1px solid #d7f0c9; border-radius:10px; padding:10px; }}
- details.teach textarea {{ width:100%; box-sizing:border-box; min-height:64px; border:1px solid #cfd8d4; border-radius:8px; padding:8px; font-family:inherit; font-size:13px; }}
- details.teach input[type=text] {{ border:1px solid #cfd8d4; border-radius:8px; padding:6px 8px; font-family:inherit; font-size:12.5px; margin-top:6px; }}
- details.teach button {{ background:#08974b; color:#fff; border:none; border-radius:8px; padding:7px 14px; font-weight:600; font-size:12.5px; margin-top:8px; cursor:pointer; }}
- details.teach button:hover {{ background:#067a3d; }}
- footer {{ color:#75808e; font-size:12px; margin:18px 4px; }}
-</style></head>
-<body>
-<header><img class="logo" src="data:image/png;base64,{LOGO_B64_}" alt="truDigital"><h1>AI Support Agent</h1>{mode}
- <span class="sub">Model: {html.escape(settings.model)} · Confidence bar: {settings.auto_reply_min_confidence}% · Page refreshes every 60s</span>
-</header>
-<div class="wrap">
+    content = f"""
  <div class="cards">
   {stat("New tickets · 24h", new_count, "/activity?f=new")}
   {stat("Handled · 24h", day.get("total", 0), "/activity?f=all&r=24h")}
@@ -296,12 +360,15 @@ def dashboard(request: Request) -> HTMLResponse:
   {EVENT_HEADERS}
   {table}
  </table>
- <footer><a href='/export.zip'>&#11015; Export all data (.zip)</a> — reasoning journal + activity log + teachings in one bundle, for audits or model training. (Journal alone: <a href='/journal.jsonl'>.jsonl</a>)<br>Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
- "Needs human: Yes" = the agent wants one of you to review before anything goes out.</footer>
-</div>
-{SORT_JS}
-</body></html>"""
+ <div class="footnote">Click a ticket number to open it in Freshdesk — the agent's triage note and draft reply are in the ticket as a private note.
+ "Needs human: Yes" = the agent wants one of you to review before anything goes out. Click any column header to sort.</div>
+{SORT_JS}"""
 
+    body = _shell(
+        "Overview", "overview",
+        f"Confidence bar: {settings.auto_reply_min_confidence}% · refreshes every 60s",
+        content, refresh=60,
+    )
     resp = HTMLResponse(body)
     if request.query_params.get("key") == settings.dashboard_key:
         resp.set_cookie("fd_agent_key", settings.dashboard_key, max_age=60 * 60 * 24 * 90, httponly=True)
@@ -390,42 +457,7 @@ def activity(request: Request) -> HTMLResponse:
     filter_pills = "".join(pill(k, v[0], f, "f") for k, v in FILTERS.items())
     range_pills = "".join(pill(k, v[0], r, "r") for k, v in RANGES.items())
 
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Activity — truDigital AI Support Agent</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
- body {{ font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
- header {{ background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; flex-wrap:wrap; }}
- header img {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; }}
- .wrap {{ max-width:1200px; margin:22px auto; padding:0 16px; }}
- .bar {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }}
- .pill {{ background:#fff; border-radius:20px; padding:6px 14px; font-size:12.5px; font-weight:600; color:#20344c; text-decoration:none; box-shadow:0 1px 3px rgba(32,52,76,.10); }}
- .pill.on {{ background:#08974b; color:#fff; }}
- .pill:hover {{ background:#5cdd31; color:#20344c; }}
- .search {{ margin-left:auto; }}
- .search input {{ border:1px solid #cfd8d4; border-radius:20px; padding:7px 14px; font-family:inherit; font-size:13px; width:220px; }}
- table {{ width:100%; border-collapse:collapse; background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 1px 3px rgba(32,52,76,.10); }}
- th {{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#75808e; padding:10px 12px; border-bottom:2px solid #ebeef2; font-weight:600; user-select:none; }}
- td {{ padding:10px 12px; border-bottom:1px solid #ebeef2; font-size:13.5px; vertical-align:top; }}
- tr:hover td {{ background:#f4faf1; }}
- a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
- .badge {{ padding:3px 9px; border-radius:20px; font-size:12px; font-weight:600; white-space:nowrap; }}
- .subj {{ max-width:340px; }}
- .detail {{ color:#c0392b; font-size:12px; margin-top:4px; }}
- .empty {{ text-align:center; color:#75808e; padding:28px; }}
- .meta {{ color:#75808e; font-size:12.5px; margin:12px 2px; }}
- details.teach {{ margin-top:6px; }}
- details.teach summary {{ cursor:pointer; color:#08974b; font-size:12px; font-weight:600; list-style:none; }}
- details.teach form {{ margin-top:8px; background:#f4faf1; border:1px solid #d7f0c9; border-radius:10px; padding:10px; }}
- details.teach textarea {{ width:100%; box-sizing:border-box; min-height:64px; border:1px solid #cfd8d4; border-radius:8px; padding:8px; font-family:inherit; font-size:13px; }}
- details.teach input[type=text] {{ border:1px solid #cfd8d4; border-radius:8px; padding:6px 8px; font-family:inherit; font-size:12.5px; margin-top:6px; }}
- details.teach button {{ background:#08974b; color:#fff; border:none; border-radius:8px; padding:7px 14px; font-weight:600; font-size:12.5px; margin-top:8px; cursor:pointer; }}
-</style></head><body>
-<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Activity</h1>
-<span style="color:#75808e;font-size:12.5px">{count} row{'s' if count != 1 else ''} · {FILTERS[f][0]} · {RANGES[r][0]} · click any column header to sort</span></header>
-<div class="wrap">
- <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a></div>
+    content = f"""
  <div class="bar">{filter_pills}</div>
  <div class="bar">{range_pills}
   <form class="search" method="get" action="/activity">
@@ -437,9 +469,12 @@ def activity(request: Request) -> HTMLResponse:
   {headers}
   {table}
  </table>
-</div>
-{SORT_JS}
-</body></html>"""
+{SORT_JS}"""
+    body = _shell(
+        "Activity", "activity",
+        f"{count} row{'s' if count != 1 else ''} · {FILTERS[f][0]} · {RANGES[r][0]} · click any column header to sort",
+        content,
+    )
     return HTMLResponse(body)
 
 
@@ -579,51 +614,16 @@ def shipping(request: Request) -> HTMLResponse:
             )
             count_line = f"{len(active)} to ship · {len(done)} completed"
 
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="300">
-<title>Shipping queue — truDigital AI Support Agent</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
- body {{ font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
- header {{ background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; flex-wrap:wrap; }}
- header img {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; }}
- .wrap {{ max-width:1000px; margin:22px auto; padding:0 16px; }}
- .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
- a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
- .badge {{ padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }}
- .meta {{ color:#75808e; font-size:12.5px; margin:14px 2px; }}
- .pill {{ background:#fff; border-radius:20px; padding:7px 16px; font-size:13px; font-weight:600; color:#20344c; text-decoration:none; box-shadow:0 1px 3px rgba(32,52,76,.10); }}
- .pill.on {{ background:#08974b; color:#fff; }}
- .pill:hover {{ background:#5cdd31; color:#20344c; text-decoration:none; }}
-</style></head><body>
-<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Shipping queue</h1>
-<span style="color:#75808e;font-size:12.5px">{count_line} · from Zoho Books sales orders · refreshes every 5 min</span></header>
-<div class="wrap">
- <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
- <a href="{zoho_url}" target="_blank">Open sales orders in Zoho Books</a></div>
+    content = f"""
+ <div class="meta"><a href="{zoho_url}" target="_blank">Open sales orders in Zoho Books &rarr;</a></div>
  {tabs}
- {inner}
-</div></body></html>"""
+ {inner}"""
+    body = _shell(
+        "Shipping", "shipping",
+        f"{count_line} · from Zoho Books sales orders · refreshes every 5 min",
+        content, refresh=300,
+    )
     return HTMLResponse(body)
-
-
-SHIP_CSS = """
- body { font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }
- header { background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; flex-wrap:wrap; }
- header img { height:34px; } header h1 { font-size:17px; margin:0; font-weight:600; }
- .wrap { max-width:820px; margin:22px auto; padding:0 16px; }
- .titem { background:#fff; border-radius:12px; padding:16px 20px; margin-bottom:12px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }
- a { color:#08974b; font-weight:600; text-decoration:none; } a:hover { text-decoration:underline; }
- .meta { color:#75808e; font-size:12.5px; margin:14px 2px; }
- label.rate { display:flex; align-items:center; gap:12px; background:#fff; border:2px solid #ebeef2; border-radius:12px; padding:14px 18px; margin-bottom:10px; cursor:pointer; font-size:14.5px; }
- label.rate:hover { border-color:#5cdd31; }
- label.rate input { transform:scale(1.3); }
- .price { margin-left:auto; font-weight:700; font-size:16px; }
- button.go { background:#08974b; color:#fff; border:none; border-radius:10px; padding:12px 24px; font-weight:700; font-size:15px; cursor:pointer; font-family:inherit; margin-top:8px; }
- button.go:hover { background:#067a3d; }
- @media print { header, .meta, .noprint { display:none !important; } body { background:#fff; } .wrap { margin:0; max-width:none; } img.label { page-break-after:always; } }
-"""
 
 
 def _ship_auth(request: Request):
@@ -760,13 +760,7 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
         options = "".join(opts)
         button = "<button class='go' type='submit' onclick=\"this.disabled=true;this.textContent='Creating label…';this.form.submit()\">Create label &amp; print</button><div style='color:#75808e;font-size:12px;margin-top:6px'>This purchases the label on your UPS account.</div>"
 
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UPS rates — {html.escape(prep.get('number') or '')}</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>{SHIP_CSS}</style></head><body>
-<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>UPS rates — {html.escape(prep.get('number') or '')}</h1></header>
-<div class="wrap">
+    content = f"""
  <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
  <div class="titem"><b>{html.escape(prep.get('customer') or '')}</b><br>
  {prep.get('players')} player{'s' if prep.get('players') != 1 else ''} &rarr; {prep.get('boxes')} box{'es' if prep.get('boxes') != 1 else ''}, {prep.get('weight_lb')} lb total
@@ -778,8 +772,11 @@ def shipping_rates(request: Request, so: str = "") -> HTMLResponse:
   {_addr_form_fields(prep, hidden=True)}
   {options}
   {button}
- </form>
-</div></body></html>"""
+ </form>"""
+    body = _shell(
+        f"UPS rates — {prep.get('number') or ''}", "shipping",
+        html.escape(prep.get("customer") or ""), content,
+    )
     return HTMLResponse(body)
 
 
@@ -875,19 +872,16 @@ def shipping_label_view(request: Request, shipment_id: int) -> HTMLResponse:
         zoho_banner = f"<div class='titem noprint' style='border-left:4px solid #e67e22'>&#9888; <b>Zoho was NOT updated</b> — {zmsg or 'create the package/shipment manually.'} The label itself is fine.</div>"
     else:
         zoho_banner = ""
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Label — {html.escape(s.get('so_number') or '')}</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>{SHIP_CSS}</style></head><body>
-<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Label — {html.escape(s.get('so_number') or '')} ({html.escape(s.get('customer') or '')})</h1></header>
-<div class="wrap">
+    content = f"""
  <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
  {zoho_banner}
  <div class="titem noprint"><b>{html.escape(s.get('service') or '')}</b>{charge}<br>Tracking: {tlinks}
  <div style='margin-top:10px'><button class='go' onclick='window.print()'>&#128424; Print label{'s' if len(labels) > 1 else ''}</button></div></div>
- {imgs}
-</div></body></html>"""
+ {imgs}"""
+    body = _shell(
+        f"Label — {s.get('so_number') or ''}", "shipping",
+        html.escape(s.get("customer") or ""), content,
+    )
     return HTMLResponse(body)
 
 
@@ -916,25 +910,12 @@ def teachings_page(request: Request) -> HTMLResponse:
         for i, c in enumerate(items, 1)
     ) or "<div class='titem'>Nothing taught yet — use the &#128172; Teach link on any dashboard row.</div>"
 
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Team teachings — truDigital AI Support Agent</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
- body {{ font-family:'Poppins',sans-serif; margin:0; background:#ebeef2; color:#20344c; }}
- header {{ background:#fff; padding:14px 28px; display:flex; align-items:center; gap:16px; border-bottom:4px solid #5cdd31; }}
- header img {{ height:34px; }} header h1 {{ font-size:17px; margin:0; font-weight:600; }}
- .wrap {{ max-width:900px; margin:22px auto; padding:0 16px; }}
- .titem {{ background:#fff; border-radius:12px; padding:14px 18px; margin-bottom:10px; box-shadow:0 1px 3px rgba(32,52,76,.10); font-size:14px; }}
- .titem .n {{ color:#08974b; font-weight:700; margin-right:8px; }}
- a {{ color:#08974b; font-weight:600; text-decoration:none; }} a:hover {{ text-decoration:underline; }}
- .meta {{ color:#75808e; font-size:12.5px; margin:14px 2px; }}
-</style></head><body>
-<header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Team teachings</h1>
-<span style="color:#75808e;font-size:12.5px">{len(items)} rule{'s' if len(items) != 1 else ''} the agent follows on every draft — newest first</span></header>
-<div class="wrap">
- <div class="meta"><a href="/dashboard">&larr; Back to dashboard</a> &nbsp;·&nbsp;
- <a href="{fd_link}" target="_blank">Edit in Freshdesk (AI Training Log ticket)</a> — add a [teach] note there or use the Teach button on the dashboard.</div>
- {rows}
-</div></body></html>"""
+    content = f"""
+ <div class="meta"><a href="{fd_link}" target="_blank">Edit in Freshdesk (AI Training Log ticket)</a> — add a [teach] note there or use the &#128172; Teach button on any activity row.</div>
+ {rows}"""
+    body = _shell(
+        "Team teachings", "teachings",
+        f"{len(items)} rule{'s' if len(items) != 1 else ''} the agent follows on every draft — newest first",
+        content,
+    )
     return HTMLResponse(body)
