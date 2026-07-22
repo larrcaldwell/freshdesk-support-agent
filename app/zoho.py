@@ -74,6 +74,94 @@ def _get(path: str, **params) -> dict:
     return r.json()
 
 
+def _post(path: str, payload: dict, **params) -> dict:
+    params["organization_id"] = settings.zoho_org_id
+    r = httpx.post(
+        f"{BOOKS_BASE}{path}",
+        json=payload,
+        params=params,
+        headers={"Authorization": f"Zoho-oauthtoken {_access_token()}"},
+        timeout=30,
+    )
+    if r.status_code >= 400:
+        log.error("Zoho POST %s -> %s: %s", path, r.status_code, r.text[:400])
+    r.raise_for_status()
+    return r.json()
+
+
+def mark_shipped(salesorder_id: str, players_qty: int, tracking: str, service: str) -> tuple[bool, str]:
+    """After a UPS label is created: create the package + shipment on the Zoho
+    sales order (with the tracking number) so the order completes in Zoho.
+    Allocates only the players actually shipped; when the last players go out,
+    any other unpacked goods lines are included too. Best-effort: returns (ok, message)."""
+    global _orders_cache
+    try:
+        detail = _get(f"/salesorders/{salesorder_id}").get("salesorder") or {}
+        player_lines, other_lines = [], []
+        for li in detail.get("line_items") or []:
+            if li.get("line_item_type") != "goods":
+                continue
+            rem = max(int(li.get("quantity") or 0) - int(li.get("quantity_packed") or 0), 0)
+            if rem <= 0:
+                continue
+            (player_lines if _is_player_item(li.get("name")) else other_lines).append((li, rem))
+
+        lines = []
+        alloc_left = players_qty
+        for li, rem in player_lines:
+            if alloc_left <= 0:
+                break
+            take = min(rem, alloc_left)
+            lines.append({"so_line_item_id": li["line_item_id"], "quantity": take})
+            alloc_left -= take
+        players_left_after = sum(rem for _, rem in player_lines) - (players_qty - alloc_left)
+        if players_left_after <= 0:  # final player shipment: include remaining goods too
+            for li, rem in other_lines:
+                lines.append({"so_line_item_id": li["line_item_id"], "quantity": rem})
+        if not lines:
+            return False, "No unpacked items left on the Zoho sales order."
+
+        today = time.strftime("%Y-%m-%d")
+        suffix = (tracking or "")[-8:] or str(int(time.time()))
+        pkg_payload: dict = {"date": today, "line_items": lines}
+        try:
+            pkg = _post("/packages", pkg_payload, salesorder_id=salesorder_id)
+        except httpx.HTTPStatusError:
+            pkg_payload["package_number"] = f"PKG-{suffix}"
+            pkg = _post("/packages", pkg_payload, salesorder_id=salesorder_id)
+        package_id = (pkg.get("package") or {}).get("package_id")
+        if not package_id:
+            return False, "Zoho created no package id."
+
+        ship_payload: dict = {
+            "date": today,
+            "delivery_method": service or "UPS",
+            "tracking_number": tracking or "",
+            "notes": "Created automatically by the truDigital support dashboard",
+        }
+        try:
+            _post("/shipmentorders", ship_payload, salesorder_id=salesorder_id,
+                  package_ids=package_id, send_notification="false")
+        except httpx.HTTPStatusError:
+            ship_payload["shipment_number"] = f"SHP-{suffix}"
+            _post("/shipmentorders", ship_payload, salesorder_id=salesorder_id,
+                  package_ids=package_id, send_notification="false")
+        _orders_cache = None  # queue refresh reflects the new shipped status
+        return True, "Package + shipment created in Zoho with tracking."
+    except httpx.HTTPStatusError as e:
+        try:
+            msg = e.response.json().get("message", "")
+        except Exception:
+            msg = ""
+        log.exception("Zoho mark_shipped failed")
+        if e.response.status_code in (401, 403) or "not authorized" in msg.lower() or "scope" in msg.lower():
+            return False, "Zoho token lacks write access — regenerate it with full access scope."
+        return False, f"Zoho error: {msg or e.response.status_code}"
+    except Exception as e:
+        log.exception("Zoho mark_shipped failed")
+        return False, str(e)[:200]
+
+
 def _is_player_item(name: str) -> bool:
     return "player" in (name or "").lower()
 

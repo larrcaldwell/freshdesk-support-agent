@@ -823,6 +823,10 @@ async def shipping_label_create(request: Request) -> HTMLResponse:
         result.get("trackings") or [], result.get("labels") or [],
         players=qty, address=prep.get("address") or "",
     )
+    # Finish the process in Zoho: create package + shipment with tracking
+    zoho_ok, zoho_msg = zoho.mark_shipped(
+        so, qty, ", ".join(result.get("trackings") or []), f"UPS {result['service']}"
+    )
     # Best-effort: post tracking to the linked RMA ticket
     if prep.get("rma_ticket"):
         try:
@@ -835,7 +839,12 @@ async def shipping_label_create(request: Request) -> HTMLResponse:
             )
         except Exception:
             log.exception("Could not post tracking note to ticket %s", prep.get("rma_ticket"))
-    return RedirectResponse(url=f"/shipping/label/{sid}", status_code=303)
+    from urllib.parse import quote
+
+    return RedirectResponse(
+        url=f"/shipping/label/{sid}?zoho={'1' if zoho_ok else '0'}&zmsg={quote(zoho_msg[:180])}",
+        status_code=303,
+    )
 
 
 @router.get("/shipping/label/{shipment_id}", response_class=HTMLResponse)
@@ -858,6 +867,14 @@ def shipping_label_view(request: Request, shipment_id: int) -> HTMLResponse:
         f"<a href='https://www.ups.com/track?tracknum={t}' target='_blank'>{t}</a>" for t in trackings if t
     )
     charge = f" · ${html.escape(s['charge'])}" if s.get("charge") else ""
+    zoho_flag = request.query_params.get("zoho")
+    zmsg = html.escape(request.query_params.get("zmsg") or "")
+    if zoho_flag == "1":
+        zoho_banner = f"<div class='titem noprint' style='border-left:4px solid #08974b'>&#9989; <b>Zoho updated:</b> {zmsg or 'package + shipment created with tracking.'}</div>"
+    elif zoho_flag == "0":
+        zoho_banner = f"<div class='titem noprint' style='border-left:4px solid #e67e22'>&#9888; <b>Zoho was NOT updated</b> — {zmsg or 'create the package/shipment manually.'} The label itself is fine.</div>"
+    else:
+        zoho_banner = ""
     body = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Label — {html.escape(s.get('so_number') or '')}</title>
@@ -866,6 +883,7 @@ def shipping_label_view(request: Request, shipment_id: int) -> HTMLResponse:
 <header><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"><h1>Label — {html.escape(s.get('so_number') or '')} ({html.escape(s.get('customer') or '')})</h1></header>
 <div class="wrap">
  <div class="meta"><a href="/shipping">&larr; Back to shipping queue</a></div>
+ {zoho_banner}
  <div class="titem noprint"><b>{html.escape(s.get('service') or '')}</b>{charge}<br>Tracking: {tlinks}
  <div style='margin-top:10px'><button class='go' onclick='window.print()'>&#128424; Print label{'s' if len(labels) > 1 else ''}</button></div></div>
  {imgs}
