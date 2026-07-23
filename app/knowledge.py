@@ -16,19 +16,33 @@ log = logging.getLogger("knowledge")
 _docs: list[tuple[str, str]] = []  # (name, text)
 
 
+def uploaded_dir() -> Path:
+    """Team-uploaded docs live on the persistent disk so they survive deploys."""
+    import os
+
+    d = Path(os.environ.get("DATA_DIR", "/tmp")) / "knowledge"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def load_docs() -> int:
     _docs.clear()
-    kdir = Path(settings.knowledge_dir)
-    if not kdir.exists():
-        return 0
-    for p in sorted(kdir.rglob("*")):
-        if p.suffix.lower() in (".md", ".txt") and p.is_file():
-            try:
-                _docs.append((str(p.relative_to(kdir)), p.read_text(errors="ignore")))
-            except OSError:
-                log.warning("Could not read %s", p)
+    dirs = [Path(settings.knowledge_dir), uploaded_dir()]
+    for kdir in dirs:
+        if not kdir.exists():
+            continue
+        for p in sorted(kdir.rglob("*")):
+            if p.suffix.lower() in (".md", ".txt") and p.is_file():
+                try:
+                    _docs.append((str(p.relative_to(kdir)), p.read_text(errors="ignore")))
+                except OSError:
+                    log.warning("Could not read %s", p)
     log.info("Loaded %d knowledge docs", len(_docs))
     return len(_docs)
+
+
+def uploaded_files() -> list[str]:
+    return sorted(p.name for p in uploaded_dir().glob("*") if p.is_file())
 
 
 def search_docs(query: str, top_k: int = 3, max_chars: int = 4000) -> str:

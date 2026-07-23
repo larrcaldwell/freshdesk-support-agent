@@ -31,6 +31,12 @@ def startup() -> None:
     problems = settings.validate()
     for p in problems:
         log.error("CONFIG: %s", p)
+    try:
+        from . import selflearn
+
+        selflearn.start_weekly_loop()
+    except Exception:
+        log.exception("Could not start self-learn loop")
     n = load_docs()
     log.info(
         "Started. auto_reply=%s min_confidence=%s categories=%s docs=%d",
@@ -198,8 +204,9 @@ async def feedback(
     subject: str = Form(""),
     correction: str = Form(...),
     author: str = Form(""),
+    back: str = Form("/dashboard"),
 ) -> RedirectResponse:
-    """Teach-the-agent form on the dashboard. Auth via the dashboard cookie."""
+    """Teach-the-agent form (dashboard rows + Teachings page). Auth via cookie."""
     supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
     if not settings.dashboard_key or supplied != settings.dashboard_key:
         raise HTTPException(status_code=401, detail="Dashboard key required")
@@ -210,7 +217,43 @@ async def feedback(
             training.add_correction(correction, context_subject=subject, ticket_ref=ticket_id, author=author.strip())
         except Exception:
             log.exception("Failed to persist teaching to Freshdesk (kept locally)")
-    return RedirectResponse(url="/dashboard", status_code=303)
+    if not back.startswith("/"):
+        back = "/dashboard"
+    return RedirectResponse(url=back, status_code=303)
+
+
+@app.post("/teachings/upload")
+async def teachings_upload(request: Request) -> RedirectResponse:
+    """Upload a training doc (.md/.txt) into the agent's knowledge base."""
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+    from . import knowledge
+
+    form = await request.form()
+    f = form.get("doc")
+    if f is None or not getattr(f, "filename", ""):
+        return RedirectResponse(url="/teachings", status_code=303)
+    name = "".join(ch for ch in f.filename if ch.isalnum() or ch in "._- ")[:80] or "upload.txt"
+    if not name.lower().endswith((".md", ".txt")):
+        name += ".txt"
+    data = await f.read()
+    (knowledge.uploaded_dir() / name).write_bytes(data[: 2 * 1024 * 1024])  # 2 MB cap
+    knowledge.load_docs()
+    log.info("Training doc uploaded: %s (%d bytes)", name, len(data))
+    return RedirectResponse(url="/teachings", status_code=303)
+
+
+@app.post("/teachings/scan")
+async def teachings_scan(request: Request, background: BackgroundTasks) -> RedirectResponse:
+    """Manually trigger the weekly self-learning scan."""
+    supplied = request.cookies.get("fd_agent_key") or request.query_params.get("key") or ""
+    if not settings.dashboard_key or supplied != settings.dashboard_key:
+        raise HTTPException(status_code=401, detail="Dashboard key required")
+    from . import selflearn
+
+    background.add_task(selflearn.run_scan, "manual")
+    return RedirectResponse(url="/teachings", status_code=303)
 
 
 @app.post("/webhook/freshchat")

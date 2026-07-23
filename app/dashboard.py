@@ -78,12 +78,13 @@ def _badge(action: str) -> str:
 
 
 
-def _teach_form(e: dict) -> str:
+def _teach_form(e: dict, back: str = "/dashboard") -> str:
     subj = html.escape(e.get("subject") or "", quote=True)
     return (
         "<details class='teach'><summary>&#128172; Teach</summary>"
         "<form method='post' action='/feedback'>"
         f"<input type='hidden' name='ticket_id' value='{e.get('ticket_id') or 0}'>"
+        f"<input type='hidden' name='back' value='{html.escape(back, quote=True)}'>"
         f"<input type='hidden' name='subject' value='{subj}'>"
         "<textarea name='correction' required placeholder=\"What was wrong, or what should it have said? e.g. 'Never offer replacements before troubleshooting' or 'The user limit on Pro is 25'\"></textarea><br>"
         "<input type='text' name='author' placeholder='Your name (optional)'>"
@@ -181,9 +182,10 @@ document.querySelectorAll('table.sortable th').forEach(function(th, idx){
 
 
 NAV = [
-    ("overview", "Overview", "/dashboard", "&#9632;"),
+    ("dashboard", "Dashboard", "/dashboard", "&#9632;"),
     ("activity", "Activity", "/activity", "&#9202;"),
     ("shipping", "Shipping", "/shipping", "&#128230;"),
+    ("support", "Support", "/support", "&#127911;"),
     ("teachings", "Teachings", "/teachings", "&#127891;"),
 ]
 
@@ -208,8 +210,9 @@ SHELL_CSS = """
  .pagehead h1 { font-size:18px; margin:0; font-weight:600; }
  .pagehead .sub { color:#75808e; font-size:12.5px; }
  .wrap { max-width:1200px; margin:24px auto; padding:0 24px; }
- .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
- .card { background:#fff; border-radius:14px; padding:16px 22px; box-shadow:0 1px 3px rgba(32,52,76,.10); min-width:128px; }
+ .cards { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:22px; }
+ @media (max-width:1000px) { .cards { grid-template-columns:repeat(2, 1fr); } }
+ .card { background:#fff; border-radius:14px; padding:16px 22px; box-shadow:0 1px 3px rgba(32,52,76,.10); }
  .num { font-size:26px; font-weight:700; color:#20344c; }
  .lbl { font-size:12px; color:#75808e; margin-top:2px; }
  a.cardlink, a.cardlink2 { text-decoration:none; display:block; }
@@ -366,7 +369,7 @@ def dashboard(request: Request) -> HTMLResponse:
 {SORT_JS}"""
 
     body = _shell(
-        "Overview", "overview",
+        "Dashboard", "dashboard",
         f"Confidence bar: {settings.auto_reply_min_confidence}% · refreshes every 60s",
         content, refresh=60,
     )
@@ -477,6 +480,78 @@ def activity(request: Request) -> HTMLResponse:
         content,
     )
     return HTMLResponse(body)
+
+
+SUPPORT_VIEWS = {
+    "needs-human": "Needs a human",
+    "drafts": "Drafts ready to review",
+    "new": "New tickets (Freshdesk)",
+}
+
+
+@router.get("/support", response_class=HTMLResponse)
+def support(request: Request) -> HTMLResponse:
+    """The rep queue: what needs human attention right now."""
+    if not settings.dashboard_key:
+        return HTMLResponse("<h3>Dashboard disabled.</h3>", status_code=503)
+    supplied = request.query_params.get("key") or request.cookies.get("fd_agent_key")
+    if supplied != settings.dashboard_key:
+        return HTMLResponse("<h3 style='font-family:sans-serif'>Access key required.</h3>", status_code=401)
+
+    v = request.query_params.get("v", "needs-human")
+    if v not in SUPPORT_VIEWS:
+        v = "needs-human"
+    fd_url = f"https://{settings.freshdesk_domain}.freshdesk.com/a/tickets"
+
+    if v == "new":
+        tickets = _fresh_new_tickets(24) or []
+        headers = "<tr><th>Created</th><th>Ticket</th><th>Customer</th><th>Subject</th><th>Status</th><th>Priority</th></tr>"
+        rows = []
+        for t in tickets:
+            try:
+                ts = datetime.fromisoformat(str(t.get("created_at", "")).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                ts = 0
+            req = t.get("requester") or {}
+            rows.append(
+                f"<tr><td data-ts='{ts}'>{_fmt_time(ts)}</td>"
+                f"<td><a href='{fd_url}/{t.get('id')}' target='_blank'>#{t.get('id')}</a></td>"
+                f"<td>{html.escape(req.get('name') or req.get('email') or '–')}</td>"
+                f"<td class='subj'>{html.escape(t.get('subject') or '')}</td>"
+                f"<td>{FD_STATUS.get(t.get('status'), t.get('status'))}</td>"
+                f"<td>{FD_PRIORITY.get(t.get('priority'), t.get('priority'))}</td></tr>"
+            )
+        table = "".join(rows) or "<tr><td colspan='6' class='empty'>No new tickets in the last 24h.</td></tr>"
+        count = len(tickets)
+    else:
+        events = store.events_since(24 * 7)
+        if v == "needs-human":
+            events = [e for e in events if e.get("needs_human")]
+        else:  # drafts
+            events = [e for e in events if e.get("action") == "draft-posted"]
+        headers = EVENT_HEADERS
+        rows = [_event_row(e, fd_url, teach=True) for e in events]
+        table = "".join(rows) or "<tr><td colspan='10' class='empty'>Queue is clear. &#127881;</td></tr>"
+        count = len(rows)
+
+    pills = "".join(
+        f"<a class='pill{' on' if k == v else ''}' href='/support?v={k}'>{label}</a>"
+        for k, label in SUPPORT_VIEWS.items()
+    )
+    content = f"""
+ <div class="bar">{pills}</div>
+ <table class="sortable">
+  {headers}
+  {table}
+ </table>
+ <div class="footnote">This queue shows the last 7 days. "Needs a human" = the agent flagged it for your judgment;
+ "Drafts ready" = a reply is waiting in the ticket as a private note — review, tweak, send.</div>
+{SORT_JS}"""
+    return HTMLResponse(_shell(
+        "Support", "support",
+        f"{count} item{'s' if count != 1 else ''} · {SUPPORT_VIEWS[v]} · refreshes every 2 min",
+        content, refresh=120,
+    ))
 
 
 @router.get("/shipping", response_class=HTMLResponse)
@@ -909,13 +984,64 @@ def teachings_page(request: Request) -> HTMLResponse:
     rows = "".join(
         f"<div class='titem'><span class='n'>{i}.</span>{html.escape(c)}</div>"
         for i, c in enumerate(items, 1)
-    ) or "<div class='titem'>Nothing taught yet — use the &#128172; Teach link on any dashboard row.</div>"
+    ) or "<div class='titem'>Nothing taught yet — add a teaching below, or use the &#128172; Teach link on any row.</div>"
+
+    from . import knowledge, selflearn
+
+    docs = knowledge.uploaded_files()
+    docs_list = (
+        "".join(f"<li>{html.escape(d)}</li>" for d in docs)
+        if docs else "<li style='color:#75808e'>No uploaded docs yet.</li>"
+    )
+    sl = selflearn.status()
+    if selflearn.is_running():
+        sl_line = "&#9203; A scan is running right now — refresh this page in a minute."
+    elif sl.get("last_run"):
+        sl_line = f"Last scan: {_fmt_time(sl['last_run'])} — {html.escape(sl.get('last_result') or '')}"
+    else:
+        sl_line = "No scan has run yet. It runs automatically every week, or start one now."
+
+    add_box = f"""
+ <div class="titem">
+  <b>&#10133; Add a teaching</b> <span style='color:#75808e;font-size:12px'>— a rule the agent follows on every future draft, effective immediately.</span>
+  <form method="post" action="/feedback" style="margin-top:8px">
+   <input type="hidden" name="ticket_id" value="0">
+   <input type="hidden" name="subject" value="Added from Teachings page">
+   <input type="hidden" name="back" value="/teachings">
+   <textarea name="correction" required placeholder="e.g. 'The user limit on the Pro plan is 25' or 'Never offer replacements before basic troubleshooting'" style="width:100%;min-height:64px;border:1px solid #cfd8d4;border-radius:8px;padding:8px;font-family:inherit;font-size:13px"></textarea><br>
+   <input type="text" name="author" placeholder="Your name (optional)" style="border:1px solid #cfd8d4;border-radius:8px;padding:6px 8px;font-family:inherit;font-size:12.5px;margin-top:6px">
+   <div><button class="go" type="submit" style="padding:9px 18px;font-size:13.5px;margin-top:8px">Add teaching</button></div>
+  </form>
+ </div>"""
+
+    upload_box = f"""
+ <div class="titem">
+  <b>&#128196; Training documents</b> <span style='color:#75808e;font-size:12px'>— upload product docs, policies, or FAQs (.md / .txt). The agent searches them on every ticket.</span>
+  <ul style="margin:8px 0;font-size:13px">{docs_list}</ul>
+  <form method="post" action="/teachings/upload" enctype="multipart/form-data">
+   <input type="file" name="doc" accept=".md,.txt" required style="font-size:13px">
+   <button class="go" type="submit" style="padding:9px 18px;font-size:13.5px;margin-left:8px">Upload</button>
+  </form>
+ </div>"""
+
+    scan_box = f"""
+ <div class="titem">
+  <b>&#129504; Weekly self-learning</b> <span style='color:#75808e;font-size:12px'>— once a week the agent studies the week's tickets (what your team actually sent vs. its drafts) and teaches itself up to 5 new rules. They appear in the list below marked "auto-learn".</span>
+  <div style="margin-top:8px;font-size:13px">{sl_line}</div>
+  <form method="post" action="/teachings/scan" style="margin-top:8px">
+   <button class="go" type="submit" style="padding:9px 18px;font-size:13.5px" onclick="this.disabled=true;this.textContent='Scanning…';this.form.submit()">Run scan now</button>
+  </form>
+ </div>"""
 
     content = f"""
- <div class="meta"><a href="{fd_link}" target="_blank">Edit in Freshdesk (AI Training Log ticket)</a> — add a [teach] note there or use the &#128172; Teach button on any activity row.</div>
+ <div class="meta"><a href="{fd_link}" target="_blank">Edit in Freshdesk (AI Training Log ticket)</a> — every teaching also lives there as a [teach] note.</div>
+ {add_box}
+ {upload_box}
+ {scan_box}
+ <h3 style="margin:22px 4px 10px;font-size:15px">Active teachings</h3>
  {rows}"""
     body = _shell(
-        "Team teachings", "teachings",
+        "Teachings", "teachings",
         f"{len(items)} rule{'s' if len(items) != 1 else ''} the agent follows on every draft — newest first",
         content,
     )
