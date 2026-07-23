@@ -191,8 +191,9 @@ SHELL_CSS = """
  * { box-sizing:border-box; }
  body { font-family:'Poppins',-apple-system,Segoe UI,Roboto,sans-serif; margin:0; background:#ebeef2; color:#20344c; display:flex; min-height:100vh; }
  .sidebar { width:212px; background:#20344c; color:#fff; flex-shrink:0; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
- .sidebar .logo { padding:20px 18px 14px; border-bottom:1px solid rgba(255,255,255,.08); }
- .sidebar .logo img { height:30px; filter:brightness(0) invert(1); }
+ .sidebar .logo { padding:16px 14px 12px; border-bottom:1px solid rgba(255,255,255,.08); }
+ .sidebar .logo span { display:inline-block; background:#fff; border-radius:10px; padding:7px 12px 4px; }
+ .sidebar .logo img { height:26px; }
  .sidebar nav { padding:12px 10px; flex:1; }
  .sidebar nav a { display:flex; align-items:center; gap:10px; color:#c6cdd7; text-decoration:none; font-size:13.5px; font-weight:500; padding:10px 12px; border-radius:10px; margin-bottom:2px; }
  .sidebar nav a:hover { background:rgba(255,255,255,.08); color:#fff; }
@@ -278,7 +279,7 @@ def _shell(title: str, active: str, sub: str, content: str, refresh: int = 0) ->
 <style>{SHELL_CSS}</style></head>
 <body>
 <aside class="sidebar">
- <div class="logo"><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"></div>
+ <div class="logo"><span><img src="data:image/png;base64,{LOGO_B64}" alt="truDigital"></span></div>
  <nav>{nav}</nav>
  <div class="foot">{mode}<br>
   <a href="/export.zip">&#11015; Export all data</a><br>
